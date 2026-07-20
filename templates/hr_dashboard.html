@@ -1,0 +1,71 @@
+{% extends "base.html" %}
+{% block title %}HR Dashboard - AutoInput Pro{% endblock %}
+{% block content %}
+
+<div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:20px;">
+    <div>
+        <h4 style="color:var(--blue);">🔴 HR Dashboard</h4>
+        <small style="color:#666;">Review & approve branch submissions</small>
+    </div>
+    <div>
+        <span class="badge bg-danger">{{ session.name }}</span>
+        <a href="/logout" class="btn btn-sm btn-outline-secondary ms-2">Logout</a>
+    </div>
+</div>
+
+<!-- Stats -->
+<div class="row g-3 mb-4">
+    <div class="col-4"><div class="card-stat yellow"><small>⏳ Pending</small><p style="font-size:28px;font-weight:700;">{{ stats.pending }}</p></div></div>
+    <div class="col-4"><div class="card-stat green"><small>✅ Approved</small><p style="font-size:28px;font-weight:700;">{{ stats.approved }}</p></div></div>
+    <div class="col-4"><div class="card-stat blue"><small>📊 Total</small><p style="font-size:28px;font-weight:700;">{{ stats.total }}</p></div></div>
+</div>
+
+<!-- Actions -->
+<div class="mb-3"><a href="/export-excel" class="btn-block btn-red"><i class="fas fa-download"></i> Export Excel Report</a></div>
+
+<!-- Submissions Table -->
+<div class="card-stat blue" style="text-align:left;">
+    <h5>📝 All Submissions</h5>
+    <div class="table-responsive mt-2">
+        <table class="table table-sm table-hover">
+            <thead style="background:var(--blue); color:white;">
+                <tr>
+                    <th>Date</th><th>KPM ID</th><th>Name</th><th>Branch</th>
+                    <th class="text-end">Loan</th><th>Status</th><th class="text-center">Action</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for s in recent %}
+                <tr>
+                    <td style="font-size:11px;">{{ s.submitted_date[:10] if s.submitted_date else '' }}</td>
+                    <td style="font-size:11px;">{{ s.kpm_id }}</td>
+                    <td>{{ s.nama_lengkap }}</td>
+                    <td>{{ s.cabang }}</td>
+                    <td class="text-end">Rp {{ "{:,.0f}".format(s.loan_amount|default(0)) }}</td>
+                    <td>
+                        {% if s.status_approval == 'Approved' %}
+                            <span class="badge bg-success">Approved</span>
+                        {% elif s.status_approval == 'Rejected' %}
+                            <span class="badge bg-danger">Rejected</span>
+                        {% else %}
+                            <span class="badge bg-warning text-dark">Pending</span>
+                        {% endif %}
+                    </td>
+                    <td class="text-center">
+                        {% if s.status_approval == 'Pending' %}
+                            <button onclick="approve({{ s.id }})" class="btn btn-sm btn-success" title="Approve">✓</button>
+                            <button onclick="reject({{ s.id }})" class="btn btn-sm btn-danger" title="Reject">✕</button>
+                        {% endif %}
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<script>
+function approve(id){ if(confirm('Approve?')){fetch('/api/approve/'+id,{method:'POST'}).then(()=>location.reload());} }
+function reject(id){ if(confirm('Reject?')){fetch('/api/reject/'+id,{method:'POST'}).then(()=>location.reload());} }
+</script>
+{% endblock %}

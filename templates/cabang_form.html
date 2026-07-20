@@ -1,0 +1,40 @@
+{% extends "base.html" %}
+{% block title %}Form - Cabang{% endblock %}
+{% block content %}
+
+<div style="display:flex; justify-content:space-between; margin-bottom:16px;">
+    <div><h4 style="color:var(--blue);">📝 Online Form</h4><small>{{ session.name }}</small></div>
+    <a href="/cabang" class="btn btn-sm btn-outline-secondary">← Back</a>
+</div>
+
+<div class="card-stat blue" style="text-align:left;">
+    <form onsubmit="submitForm(event)">
+        <div class="row g-2">
+            <div class="col-6"><label class="form-label fw-bold" style="font-size:12px;">NPK</label><input type="text" name="npk" class="form-control" required></div>
+            <div class="col-6"><label class="form-label fw-bold" style="font-size:12px;">KPM ID</label><input type="text" name="kpm_id" class="form-control" required></div>
+            <div class="col-12"><label class="form-label fw-bold" style="font-size:12px;">Nama Lengkap</label><input type="text" name="nama_lengkap" class="form-control" required></div>
+            <div class="col-6"><label class="form-label fw-bold" style="font-size:12px;">Loan (Rp)</label><input type="number" name="loan_amount" class="form-control" required></div>
+            <div class="col-6"><label class="form-label fw-bold" style="font-size:12px;">DP (Rp)</label><input type="number" name="down_payment" class="form-control" required></div>
+            <div class="col-6"><label class="form-label fw-bold" style="font-size:12px;">Total AR</label><input type="number" name="total_ar" class="form-control" required></div>
+            <div class="col-6"><label class="form-label fw-bold" style="font-size:12px;">Tanggal</label><input type="date" name="tanggal_mulai" class="form-control" required></div>
+            <div class="col-4"><label class="form-label fw-bold" style="font-size:12px;">Tenor</label><input type="number" name="tenure_months" class="form-control" value="36"></div>
+            <div class="col-4"><label class="form-label fw-bold" style="font-size:12px;">Type</label><select name="loan_type" class="form-control"><option>Regular</option><option>Fleet</option></select></div>
+            <div class="col-4"><label class="form-label fw-bold" style="font-size:12px;">Rate %</label><input type="number" name="interest_rate" class="form-control" value="5" step="0.1"></div>
+            <div class="col-12"><label class="form-label fw-bold" style="font-size:12px;">Cabang</label><input type="text" name="cabang" class="form-control" value="{{ session.name }}" required></div>
+        </div>
+        <button type="submit" class="btn-block btn-red mt-3">Submit to HR</button>
+    </form>
+</div>
+
+<script>
+function submitForm(e){
+    e.preventDefault();
+    const d=Object.fromEntries(new FormData(e.target));
+    d.loan_amount=parseFloat(d.loan_amount);d.down_payment=parseFloat(d.down_payment);
+    d.total_ar=parseFloat(d.total_ar);d.tenure_months=parseInt(d.tenure_months);
+    d.interest_rate=parseFloat(d.interest_rate)/100;d.document_source='Online Form';
+    fetch('/api/submit',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(d)})
+    .then(r=>r.json()).then(res=>{if(res.status=='success'){alert('Submitted!');window.location.href='/cabang';}});
+}
+</script>
+{% endblock %}

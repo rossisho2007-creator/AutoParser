@@ -1,265 +1,296 @@
-from flask import Flask, render_template, request, redirect, url_for, flash, send_file
+"""
+AutoInput Pro - Dual Role System
+🔵 Cabang: Upload only (can't see submissions)
+🔴 HR: Review & approve (can't upload)
+"""
+
+from flask import Flask, render_template, request, redirect, url_for, flash, send_file, jsonify, session
+from flask_cors import CORS
 from werkzeug.utils import secure_filename
 import pandas as pd
-import plotly.express as px
-import plotly.io as pio
-import os
+import os, re, json, sqlite3
 from datetime import datetime
 from io import BytesIO
+from functools import wraps
 
 app = Flask(__name__)
-app.config['SECRET_KEY'] = 'sheetgraph-dev-key-2024'
+CORS(app)
+app.config['SECRET_KEY'] = 'autopro-2024-secure'
 app.config['UPLOAD_FOLDER'] = 'uploads'
-app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024
-ALLOWED_EXTENSIONS = {'xlsx', 'xls', 'csv'}
+app.config['MAX_CONTENT_LENGTH'] = 50 * 1024 * 1024
 os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
 
-data_store = {}
+# ═══════════════════════════════════
+# SIMPLE AUTH (for demo - use Azure AD in production)
+# ═══════════════════════════════════
+USERS = {
+    'hr': {'password': 'hr123', 'role': 'hr', 'name': 'HR Officer'},
+    'cabang1': {'password': 'cabang123', 'role': 'cabang', 'name': 'Cabang Jakarta South'},
+    'cabang2': {'password': 'cabang123', 'role': 'cabang', 'name': 'Cabang Bandung'},
+}
 
-def allowed_file(filename):
-    return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
+def login_required(f):
+    @wraps(f)
+    def decorated(*args, **kwargs):
+        if 'user' not in session:
+            return redirect(url_for('login'))
+        return f(*args, **kwargs)
+    return decorated
 
-@app.route('/')
-def home():
-    stats = {
-        'total_files': len(data_store),
-        'total_sheets': sum(len(v) for v in data_store.values()),
-        'total_records': sum(sum(len(df) for df in v.values()) for v in data_store.values())
-    }
-    return render_template('index.html', stats=stats)
+def hr_required(f):
+    @wraps(f)
+    def decorated(*args, **kwargs):
+        if 'user' not in session or session.get('role') != 'hr':
+            flash('⛔ Access denied. HR only.', 'danger')
+            return redirect(url_for('login'))
+        return f(*args, **kwargs)
+    return decorated
 
-@app.route('/upload', methods=['GET', 'POST'])
-def upload():
-    if request.method == 'POST':
-        if 'file' not in request.files:
-            flash('No file selected', 'error')
-            return redirect(url_for('upload'))
-        
-        file = request.files['file']
-        if file.filename == '':
-            flash('No file selected', 'error')
-            return redirect(url_for('upload'))
-        
-        if not allowed_file(file.filename):
-            flash('Invalid file type. Use .xlsx, .xls, or .csv', 'error')
-            return redirect(url_for('upload'))
-        
-        try:
-            filename = secure_filename(file.filename)
-            filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
-            file.save(filepath)
-            
-            excel_data = {}
-            if filename.endswith('.csv'):
-                df = pd.read_csv(filepath)
-                excel_data['Sheet1'] = df
-            else:
-                xl_file = pd.ExcelFile(filepath)
-                for sheet_name in xl_file.sheet_names:
-                    excel_data[sheet_name] = pd.read_excel(filepath, sheet_name=sheet_name)
-            
-            data_store[filename] = excel_data
-            
-            preview = {}
-            for sheet_name, df in excel_data.items():
-                preview[sheet_name] = {
-                    'columns': df.columns.tolist(),
-                    'rows': len(df),
-                    'numeric_cols': len(df.select_dtypes(include=['number']).columns),
-                    'head': df.head(5).to_dict('records')
-                }
-            
-            flash(f'Successfully uploaded {filename}!', 'success')
-            return render_template('upload.html', filename=filename, preview=preview, files=list(data_store.keys()))
-        
-        except Exception as e:
-            flash(f'Error: {str(e)}', 'error')
-            return redirect(url_for('upload'))
-    
-    return render_template('upload.html', files=list(data_store.keys()))
+def cabang_required(f):
+    @wraps(f)
+    def decorated(*args, **kwargs):
+        if 'user' not in session or session.get('role') != 'cabang':
+            flash('⛔ Access denied.', 'danger')
+            return redirect(url_for('login'))
+        return f(*args, **kwargs)
+    return decorated
 
-@app.route('/view/<filename>')
-def view_data(filename):
-    if filename not in data_store:
-        flash('File not found', 'error')
-        return redirect(url_for('upload'))
-    
-    excel_data = data_store[filename]
-    sheet_name = request.args.get('sheet')
-    if not sheet_name or sheet_name not in excel_data:
-        sheet_name = list(excel_data.keys())[0]
-    
-    df = excel_data[sheet_name]
-    page = int(request.args.get('page', 1))
-    per_page = 50
-    total_rows = len(df)
-    total_pages = max(1, (total_rows + per_page - 1) // per_page)
-    
-    start_idx = (page - 1) * per_page
-    end_idx = min(start_idx + per_page, total_rows)
-    page_data = df.iloc[start_idx:end_idx].to_dict('records')
-    
-    return render_template('view.html',
-                         filename=filename,
-                         sheets=list(excel_data.keys()),
-                         current_sheet=sheet_name,
-                         columns=df.columns.tolist(),
-                         data=page_data,
-                         page=page,
-                         total_pages=total_pages,
-                         total_rows=total_rows)
+# ═══════════════════════════════════
+# DATABASE
+# ═══════════════════════════════════
+def get_db():
+    conn = sqlite3.connect('data.db')
+    conn.row_factory = sqlite3.Row
+    return conn
 
-@app.route('/graphs/<filename>')
-def show_graphs(filename):
-    if filename not in data_store:
-        flash('File not found', 'error')
-        return redirect(url_for('upload'))
-    
-    excel_data = data_store[filename]
-    sheet_name = request.args.get('sheet')
-    if not sheet_name or sheet_name not in excel_data:
-        sheet_name = list(excel_data.keys())[0]
-    
-    df = excel_data[sheet_name]
-    graphs_html = {}
-    
-    numeric_cols = df.select_dtypes(include=['number']).columns
-    categorical_cols = df.select_dtypes(include=['object']).columns
-    
-    if len(categorical_cols) > 0 and len(numeric_cols) > 0:
-        top_cats = df[categorical_cols[0]].value_counts().head(10).index
-        df_filtered = df[df[categorical_cols[0]].isin(top_cats)]
-        agg_data = df_filtered.groupby(categorical_cols[0])[numeric_cols[0]].sum().reset_index()
-        fig = px.bar(agg_data, x=numeric_cols[0], y=categorical_cols[0], 
-                    title=f'{numeric_cols[0]} by {categorical_cols[0]}')
-        fig.update_layout(template='plotly_white', height=400)
-        graphs_html['bar_chart'] = pio.to_html(fig, full_html=False)
-    
-    if len(numeric_cols) > 0:
-        fig = px.histogram(df, x=numeric_cols[0], title=f'Distribution of {numeric_cols[0]}')
-        fig.update_layout(template='plotly_white', height=400)
-        graphs_html['histogram'] = pio.to_html(fig, full_html=False)
-    
-    if len(numeric_cols) >= 2:
-        fig = px.scatter(df, x=numeric_cols[0], y=numeric_cols[1], 
-                        title=f'{numeric_cols[1]} vs {numeric_cols[0]}', trendline='ols')
-        fig.update_layout(template='plotly_white', height=400)
-        graphs_html['scatter_plot'] = pio.to_html(fig, full_html=False)
-    
-    stats = {
-        'total_rows': len(df),
-        'total_columns': len(df.columns),
-        'numeric_columns': len(numeric_cols),
-        'categorical_columns': len(categorical_cols),
-        'missing_values': int(df.isnull().sum().sum())
-    }
-    
-    return render_template('graphs.html',
-                         filename=filename,
-                         sheets=list(excel_data.keys()),
-                         current_sheet=sheet_name,
-                         graphs=graphs_html,
-                         stats=stats)
+def init_db():
+    conn = get_db()
+    conn.execute('''CREATE TABLE IF NOT EXISTS submissions (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        npk TEXT, kpm_id TEXT UNIQUE, nama_lengkap TEXT,
+        loan_amount REAL, down_payment REAL, total_ar REAL,
+        tanggal_mulai TEXT, tenure_months INTEGER,
+        loan_type TEXT, interest_rate REAL, cabang TEXT,
+        principal REAL, total_interest REAL,
+        monthly_installment REAL, outstanding_balance REAL,
+        status_approval TEXT DEFAULT 'Pending',
+        submitted_by TEXT, approved_by TEXT,
+        document_source TEXT, ocr_confidence REAL,
+        submitted_date DATETIME DEFAULT CURRENT_TIMESTAMP,
+        approved_date DATETIME
+    )''')
+    conn.commit()
+    conn.close()
 
-@app.route('/generate-report/<filename>')
-def generate_report(filename):
-    if filename not in data_store:
-        flash('File not found', 'error')
-        return redirect(url_for('upload'))
-    
+init_db()
+
+# ═══════════════════════════════════
+# OCR + CALCULATIONS (same as before)
+# ═══════════════════════════════════
+COLUMN_PATTERNS = {
+    'npk': [r'(?:NPK|No\.?\s*PK)[\s:]*([A-Za-z0-9\-]+)'],
+    'kpm_id': [r'(?:KPM)[\s:\-]*(\d{10,})'],
+    'nama_lengkap': [r'(?:Nama|Customer|Debitur)[\s:]*([A-Za-z\s\.]{3,50}?)(?:\n|$)'],
+    'loan_amount': [r'(?:Loan|Pinjaman|AF|Plafon)[\s:]*[Rp\.\s]*([\d,\.]+)'],
+    'down_payment': [r'(?:DP|Down\s*Payment|Uang\s*Muka)[\s:]*[Rp\.\s]*([\d,\.]+)'],
+    'total_ar': [r'(?:Total\s*AR|AR|Piutang)[\s:]*[Rp\.\s]*([\d,\.]+)'],
+    'tanggal_mulai': [r'(?:Tanggal|Tgl|Date)[\s:]*(\d{1,2}[\s/\-\.]\d{1,2}[\s/\-\.]\d{2,4})'],
+    'tenure_months': [r'(?:Tenure|Tenor|Jangka)[\s:]*(\d+)'],
+    'loan_type': [r'(?:Type|Jenis|Produk)[\s:]*(Regular|Fleet|Siap\s*Dana|KINTO)'],
+    'interest_rate': [r'(?:Interest|Bunga|Rate)[\s:]*([\d.,]+)\s*%?'],
+    'cabang': [r'(?:Cabang|Branch|Kantor)[\s:]*([A-Za-z\s\-]{3,40}?)(?:\n|$)'],
+}
+
+def ocr_scan_image(image_path):
     try:
-        excel_data = data_store[filename]
+        import pytesseract
+        from PIL import Image
+        img = Image.open(image_path).convert('L')
+        return pytesseract.image_to_string(img, lang='eng+ind').strip()
+    except:
+        return None
+
+def smart_parse(text):
+    result, conf = {}, {}
+    for field, patterns in COLUMN_PATTERNS.items():
+        for p in patterns:
+            m = re.search(p, text, re.IGNORECASE|re.MULTILINE)
+            if m:
+                v = m.group(1).strip()
+                if field in ['loan_amount','down_payment','total_ar']:
+                    v = float(re.sub(r'[^\d]','',v))
+                elif field == 'tenure_months': v = int(re.sub(r'[^\d]','',v))
+                elif field == 'interest_rate':
+                    v = float(v.replace(',','.'))
+                    if v > 1: v /= 100
+                result[field] = v; conf[field] = 85; break
+    return result, conf
+
+def calculate(data):
+    try:
+        loan = float(data.get('loan_amount',0))
+        dp = float(data.get('down_payment',0))
+        tenor = int(data.get('tenure_months',12))
+        rate = float(data.get('interest_rate',0.05))
+        principal = loan - dp
+        total_int = principal * rate * (tenor/12)
+        monthly = (principal + total_int) / tenor if tenor > 0 else 0
+        return {'principal':round(principal),'total_interest':round(total_int),
+                'monthly_installment':round(monthly),'outstanding_balance':round(principal+total_int)}
+    except: return {}
+
+# ═══════════════════════════════════
+# ROUTES
+# ═══════════════════════════════════
+
+@app.route('/login', methods=['GET','POST'])
+def login():
+    if request.method == 'POST':
+        username = request.form.get('username','').lower()
+        password = request.form.get('password','')
         
-        from openpyxl import Workbook
-        from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
-        from openpyxl.utils import get_column_letter
-        
-        wb = Workbook()
-        if 'Sheet' in wb.sheetnames:
-            wb.remove(wb['Sheet'])
-        
-        # Create formatted sheets
-        for sheet_name, df in excel_data.items():
-            ws = wb.create_sheet(str(sheet_name)[:31])
+        if username in USERS and USERS[username]['password'] == password:
+            session['user'] = username
+            session['role'] = USERS[username]['role']
+            session['name'] = USERS[username]['name']
+            flash(f'Welcome, {USERS[username]["name"]}!', 'success')
             
-            # Headers
-            header_fill = PatternFill(start_color='1B4332', end_color='1B4332', fill_type='solid')
-            header_font = Font(name='Calibri', size=12, bold=True, color='FFFFFF')
-            
-            for col_idx, column in enumerate(df.columns, 1):
-                cell = ws.cell(row=1, column=col_idx, value=column)
-                cell.font = header_font
-                cell.fill = header_fill
-                cell.alignment = Alignment(horizontal='center')
-            
-            # Data
-            for row_idx, (_, row_data) in enumerate(df.iterrows(), 2):
-                for col_idx, value in enumerate(row_data, 1):
-                    ws.cell(row=row_idx, column=col_idx, value=value)
-            
-            # Auto-fit columns
-            for col_idx, column in enumerate(df.columns, 1):
-                max_length = max(df[column].astype(str).str.len().max(), len(str(column)))
-                ws.column_dimensions[get_column_letter(col_idx)].width = min(max_length + 3, 50)
-            
-            ws.auto_filter.ref = ws.dimensions
-            ws.freeze_panes = 'A2'
-        
-        output = BytesIO()
-        wb.save(output)
-        output.seek(0)
-        
-        return send_file(output,
-                        mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-                        as_attachment=True,
-                        download_name=f'SheetGraph_Report_{datetime.now().strftime("%Y%m%d_%H%M%S")}.xlsx')
+            # Redirect based on role
+            if USERS[username]['role'] == 'hr':
+                return redirect(url_for('hr_dashboard'))
+            else:
+                return redirect(url_for('cabang_upload'))
+        else:
+            flash('Invalid credentials', 'danger')
     
-    except Exception as e:
-        flash(f'Error: {str(e)}', 'error')
-        return redirect(url_for('upload'))
+    return render_template('login.html')
 
-@app.route('/delete/<filename>', methods=['POST'])
-def delete_file(filename):
-    if filename in data_store:
-        del data_store[filename]
-        filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
-        if os.path.exists(filepath):
-            os.remove(filepath)
-        flash(f'{filename} deleted', 'success')
-    return redirect(url_for('upload'))
+@app.route('/logout')
+def logout():
+    session.clear()
+    return redirect(url_for('login'))
 
-@app.route('/download-template')
-def download_template():
-    template_data = {
-        'Sales': pd.DataFrame({
-            'Date': pd.date_range('2024-01-01', periods=50, freq='D'),
-            'Product': ['Product A', 'Product B', 'Product C', 'Product D'] * 12 + ['Product A', 'Product B'],
-            'Quantity': [10, 25, 15, 30] * 12 + [10, 25],
-            'Price': [100, 200, 150, 300] * 12 + [100, 200],
-            'Region': ['North', 'South', 'East', 'West'] * 12 + ['North', 'South'],
-            'Salesperson': ['John', 'Jane', 'Bob', 'Alice'] * 12 + ['John', 'Jane']
-        }),
-        'Inventory': pd.DataFrame({
-            'Item_Code': [f'ITM{i:03d}' for i in range(1, 21)],
-            'Item_Name': [f'Product {i}' for i in range(1, 21)],
-            'Stock_Level': [100, 150, 75, 200, 50, 125, 175, 90, 110, 80,
-                          130, 160, 140, 95, 105, 180, 70, 120, 155, 85],
-            'Unit_Price': [10.99, 24.99, 15.50, 30.00, 8.75, 12.50, 18.99, 22.00,
-                         9.99, 11.50, 14.75, 27.50, 16.25, 13.99, 19.50, 33.00,
-                         7.99, 21.50, 26.00, 17.75]
-        })
+# 🔴 HR ROUTES
+@app.route('/hr')
+@hr_required
+def hr_dashboard():
+    conn = get_db()
+    stats = {
+        'pending': conn.execute("SELECT COUNT(*) FROM submissions WHERE status_approval='Pending'").fetchone()[0],
+        'approved': conn.execute("SELECT COUNT(*) FROM submissions WHERE status_approval='Approved'").fetchone()[0],
+        'total': conn.execute("SELECT COUNT(*) FROM submissions").fetchone()[0],
+        'amount': conn.execute("SELECT COALESCE(SUM(loan_amount),0) FROM submissions").fetchone()[0],
     }
-    
+    recent = [dict(r) for r in conn.execute(
+        "SELECT * FROM submissions ORDER BY submitted_date DESC LIMIT 50").fetchall()]
+    conn.close()
+    return render_template('hr_dashboard.html', stats=stats, recent=recent)
+
+@app.route('/api/approve/<int:id>', methods=['POST'])
+@hr_required
+def approve(id):
+    conn = get_db()
+    conn.execute("UPDATE submissions SET status_approval='Approved', approved_by=?, approved_date=CURRENT_TIMESTAMP WHERE id=?",
+                 (session.get('name','HR'), id))
+    conn.commit()
+    conn.close()
+    return jsonify({'status':'ok'})
+
+@app.route('/api/reject/<int:id>', methods=['POST'])
+@hr_required
+def reject(id):
+    conn = get_db()
+    conn.execute("UPDATE submissions SET status_approval='Rejected' WHERE id=?", (id,))
+    conn.commit()
+    conn.close()
+    return jsonify({'status':'ok'})
+
+@app.route('/export-excel')
+@hr_required
+def export():
+    conn = get_db()
+    df = pd.read_sql_query("SELECT * FROM submissions ORDER BY submitted_date DESC", conn)
+    conn.close()
     output = BytesIO()
-    with pd.ExcelWriter(output, engine='openpyxl') as writer:
-        for sheet_name, df in template_data.items():
-            df.to_excel(writer, sheet_name=sheet_name, index=False)
-    
+    with pd.ExcelWriter(output, engine='openpyxl') as w:
+        df.to_excel(w, sheet_name='Submissions', index=False)
     output.seek(0)
-    return send_file(output,
-                    mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-                    as_attachment=True,
-                    download_name='SheetGraph_Template.xlsx')
+    return send_file(output, download_name=f'HR_Report_{datetime.now().strftime("%Y%m%d")}.xlsx',
+                    mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+
+# 🔵 CABANG ROUTES
+@app.route('/cabang')
+@cabang_required
+def cabang_upload():
+    return render_template('cabang_upload.html')
+
+@app.route('/cabang/scan', methods=['GET','POST'])
+@cabang_required
+def cabang_scan():
+    parsed, confidence, raw_text, calculations = None, None, None, None
+    
+    if request.method == 'POST':
+        file = request.files.get('document')
+        if file and file.filename:
+            filepath = os.path.join(app.config['UPLOAD_FOLDER'], secure_filename(file.filename))
+            file.save(filepath)
+            raw_text = ocr_scan_image(filepath)
+            if raw_text:
+                parsed, confidence = smart_parse(raw_text)
+                if parsed:
+                    calculations = calculate(parsed)
+                    flash('✅ Document scanned! Verify data below.', 'success')
+                else:
+                    flash('⚠️ Could not detect data patterns.', 'warning')
+            else:
+                flash('⚠️ OCR failed. Try a clearer image.', 'warning')
+    
+    return render_template('cabang_scan.html', parsed=parsed, confidence=confidence,
+                         raw_text=raw_text, calculations=calculations)
+
+@app.route('/cabang/form')
+@cabang_required
+def cabang_form():
+    return render_template('cabang_form.html')
+
+@app.route('/api/submit', methods=['POST'])
+@cabang_required
+def submit():
+    try:
+        data = request.json
+        calculations = calculate(data)
+        data.update(calculations)
+        
+        conn = get_db()
+        conn.execute('''INSERT OR REPLACE INTO submissions 
+            (npk, kpm_id, nama_lengkap, loan_amount, down_payment, total_ar,
+             tanggal_mulai, tenure_months, loan_type, interest_rate, cabang,
+             principal, total_interest, monthly_installment, outstanding_balance,
+             submitted_by, document_source, ocr_confidence)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)''',
+            (data.get('npk'), data.get('kpm_id'), data.get('nama_lengkap'),
+             data.get('loan_amount'), data.get('down_payment'), data.get('total_ar'),
+             data.get('tanggal_mulai'), data.get('tenure_months'), data.get('loan_type'),
+             data.get('interest_rate'), data.get('cabang'),
+             data.get('principal'), data.get('total_interest'),
+             data.get('monthly_installment'), data.get('outstanding_balance'),
+             session.get('name','Cabang'), data.get('document_source','Manual'),
+             data.get('ocr_confidence',100)))
+        conn.commit()
+        conn.close()
+        return jsonify({'status':'success','calculations':calculations})
+    except Exception as e:
+        return jsonify({'status':'error','message':str(e)}),500
+
+# Default redirect
+@app.route('/')
+def index():
+    if 'user' in session:
+        if session.get('role') == 'hr':
+            return redirect(url_for('hr_dashboard'))
+        else:
+            return redirect(url_for('cabang_upload'))
+    return redirect(url_for('login'))
 
 if __name__ == '__main__':
     app.run(debug=True, host='0.0.0.0', port=5000)

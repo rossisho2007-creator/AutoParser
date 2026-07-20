@@ -1,0 +1,33 @@
+{% extends "base.html" %}
+{% block title %}Login - AutoInput Pro{% endblock %}
+{% block content %}
+<div style="max-width:400px; margin:60px auto;">
+    <div class="text-center mb-4">
+        <div style="font-size:48px;">🔐</div>
+        <h3 style="color:var(--blue);">AutoInput Pro</h3>
+        <p style="color:#666;">Sign in to continue</p>
+    </div>
+    
+    <div class="card-stat blue" style="text-align:left;">
+        <form method="POST">
+            <div class="mb-3">
+                <label class="form-label fw-bold">Username</label>
+                <input type="text" name="username" class="form-control" required autofocus>
+            </div>
+            <div class="mb-3">
+                <label class="form-label fw-bold">Password</label>
+                <input type="password" name="password" class="form-control" required>
+            </div>
+            <button type="submit" class="btn-block btn-red">Sign In</button>
+        </form>
+    </div>
+    
+    <div class="text-center mt-4">
+        <small style="color:#999;">
+            <strong>Demo Accounts:</strong><br>
+            🔴 HR: <code>hr</code> / <code>hr123</code><br>
+            🔵 Cabang: <code>cabang1</code> / <code>cabang123</code>
+        </small>
+    </div>
+</div>
+{% endblock %}
