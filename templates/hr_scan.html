@@ -4,130 +4,196 @@
 
 <div style="display:flex; justify-content:space-between; margin-bottom:16px;">
     <div>
-        <h4 style="color:var(--blue);">📸 Scan Document (HR)</h4>
-        <small style="color:#666;">{{ session.name }} - Auto-approved on submit</small>
+        <h4 style="color:var(--blue);">📸 Scan Document</h4>
+        <small style="color:#666;">HR Office</small>
     </div>
-    <a href="/hr" class="btn btn-sm btn-outline-secondary">← Dashboard</a>
+    <a href="/hr" class="btn btn-sm btn-outline-secondary">← Back</a>
 </div>
 
 {% if not parsed %}
-<div class="row g-3 mb-3">
+<div class="row g-3 mb-3" id="uploadOptions">
     <div class="col-6">
         <div class="upload-box" onclick="document.getElementById('fileInput').click()">
-            <div style="font-size:40px;">📁</div><p style="font-weight:600;">Upload</p>
+            <div style="font-size:40px;">📁</div><p style="font-weight:600;">Upload File</p>
         </div>
     </div>
     <div class="col-6">
         <div class="upload-box" onclick="startCamera()">
-            <div style="font-size:40px;">📸</div><p style="font-weight:600;">Camera</p>
+            <div style="font-size:40px;">📸</div><p style="font-weight:600;">Take Photo</p>
         </div>
     </div>
 </div>
 
-<form method="POST" enctype="multipart/form-data" id="sf" style="display:none;">
-    <input type="file" name="document" id="fileInput" onchange="up(this)">
+<!-- Hidden form for file upload only -->
+<form method="POST" enctype="multipart/form-data" id="uploadForm" style="display:none;">
+    <input type="file" name="document" id="fileInput" accept=".pdf,.jpg,.jpeg,.png" onchange="uploadFile(this.files[0])">
 </form>
-<input type="file" id="pc" accept="image/*" capture="environment" style="display:none;" onchange="up(this)">
 
-<div id="cam" class="camera-overlay" style="display:none;">
-    <video id="v" autoplay playsinline style="transform: scaleX(-1);"></video>
-    <canvas id="c" style="display:none;"></canvas>
-    <div style="padding:16px;display:flex;gap:8px;">
-        <button onclick="snap()" style="flex:1;padding:14px;background:var(--red);color:white;border:none;border-radius:50px;font-weight:700;">Capture</button>
-        <button onclick="closeCam()" style="flex:1;padding:14px;background:#666;color:white;border:none;border-radius:50px;font-weight:700;">Cancel</button>
+<!-- Phone camera input -->
+<input type="file" id="phoneCamera" accept="image/*" capture="environment" style="display:none;" onchange="uploadFile(this.files[0])">
+
+<!-- Camera Modal -->
+<div id="cameraModal" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:black; z-index:9999; flex-direction:column; justify-content:center; align-items:center;">
+    <video id="video" autoplay playsinline style="width:100%; max-height:70vh; object-fit:cover;"></video>
+    <canvas id="canvas" style="display:none;"></canvas>
+    <div style="padding:20px; display:flex; gap:12px; width:100%; max-width:400px;">
+        <button onclick="capturePhoto()" style="flex:1; padding:16px; background:#DC3545; color:white; border:none; border-radius:50px; font-size:18px; font-weight:700;">📷 Capture</button>
+        <button onclick="switchCamera()" style="padding:16px 24px; background:#1A3A5C; color:white; border:none; border-radius:50px; font-size:18px;">🔄</button>
+        <button onclick="closeCamera()" style="padding:16px 24px; background:#666; color:white; border:none; border-radius:50px; font-size:18px;">✕</button>
     </div>
 </div>
-<div id="load" style="display:none;text-align:center;padding:40px;"><div style="font-size:48px;">🔍</div><p>Processing...</p></div>
+
+<!-- Loading -->
+<div id="loadingOverlay" style="display:none; text-align:center; padding:60px 20px;">
+    <div style="font-size:64px;">🔍</div>
+    <h4 style="color:#1A3A5C; margin-top:16px;">Processing Document...</h4>
+    <p style="color:#666;">Extracting text with OCR</p>
+    <div class="spinner-border text-danger mt-3" role="status"></div>
+</div>
 
 <script>
-let st=null; const isM=/Android|iPhone/i.test(navigator.userAgent);
-function startCamera(){if(isM){document.getElementById('pc').click();return;} openCam();}
-async function openCam(){document.getElementById('cam').style.display='flex';st=await navigator.mediaDevices.getUserMedia({video:{facingMode:'environment'}});document.getElementById('v').srcObject=st;}
-function closeCam(){if(st){st.getTracks().forEach(t=>t.stop());}document.getElementById('cam').style.display='none';}
-function snap(){const v=document.getElementById('v'),c=document.getElementById('c');c.width=v.videoWidth;c.height=v.videoHeight;c.getContext('2d').drawImage(v,0,0);closeCam();c.toBlob(b=>upFile(new File([b],'p.jpg',{type:'image/jpeg'})),'image/jpeg',0.9);}
-function up(i){if(i.files[0])upFile(i.files[0]);}
-function upFile(f){document.querySelector('.row').style.display='none';document.getElementById('load').style.display='block';const fd=new FormData();fd.append('document',f);fetch('/hr/scan',{method:'POST',body:fd}).then(r=>r.text()).then(h=>{document.querySelector('.main-content').innerHTML=h;});}
+let stream = null;
+let facingMode = 'environment';
+const isMobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
+
+function startCamera() {
+    if (isMobile) {
+        document.getElementById('phoneCamera').click();
+        return;
+    }
+    openWebcam();
+}
+
+async function openWebcam() {
+    try {
+        document.getElementById('cameraModal').style.display = 'flex';
+        stream = await navigator.mediaDevices.getUserMedia({
+            video: { facingMode: facingMode, width: {ideal: 1920}, height: {ideal: 1080} }
+        });
+        const video = document.getElementById('video');
+        video.srcObject = stream;
+        video.style.transform = facingMode === 'user' ? 'scaleX(-1)' : 'none';
+    } catch(e) {
+        alert('Camera access denied. Please allow camera in browser settings.');
+        document.getElementById('cameraModal').style.display = 'none';
+    }
+}
+
+function closeCamera() {
+    if (stream) { stream.getTracks().forEach(t => t.stop()); stream = null; }
+    document.getElementById('cameraModal').style.display = 'none';
+}
+
+function switchCamera() {
+    facingMode = facingMode === 'environment' ? 'user' : 'environment';
+    closeCamera();
+    openWebcam();
+}
+
+function capturePhoto() {
+    const video = document.getElementById('video');
+    const canvas = document.getElementById('canvas');
+    
+    canvas.width = video.videoWidth;
+    canvas.height = video.videoHeight;
+    const ctx = canvas.getContext('2d');
+    
+    // Flip if using front camera
+    if (facingMode === 'user') {
+        ctx.translate(canvas.width, 0);
+        ctx.scale(-1, 1);
+    }
+    
+    ctx.drawImage(video, 0, 0);
+    closeCamera();
+    
+    // Convert to blob and upload via fetch
+    canvas.toBlob(function(blob) {
+        const file = new File([blob], 'camera_capture.jpg', { type: 'image/jpeg' });
+        uploadFile(file);
+    }, 'image/jpeg', 0.95);
+}
+
+function uploadFile(file) {
+    if (!file) return;
+    
+    // Hide upload options
+    document.getElementById('uploadOptions').style.display = 'none';
+    
+    // Show loading
+    document.getElementById('loadingOverlay').style.display = 'block';
+    
+    // Create form data and send via fetch
+    const formData = new FormData();
+    formData.append('document', file);
+    
+    fetch('/hr/scan', {
+        method: 'POST',
+        body: formData
+    })
+    .then(response => response.text())
+    .then(html => {
+        // Replace the entire main content with the response
+        document.querySelector('.main-content').innerHTML = 
+            new DOMParser().parseFromString(html, 'text/html').querySelector('.main-content').innerHTML;
+    })
+    .catch(error => {
+        alert('Error: ' + error.message);
+        location.reload();
+    });
+}
 </script>
 
 {% else %}
+<!-- RESULTS -->
 <div class="card-stat blue" style="text-align:left;">
-    <h5>✅ Scanned Data</h5>
+    <h5>✅ Document Scanned Successfully</h5>
     
-    <!-- EDITABLE FIELDS WITH LIVE CALC -->
+    {% if raw_text %}
+    <details style="margin-bottom:12px;">
+        <summary style="cursor:pointer; color:#666; font-size:13px;">📄 View Raw OCR Text</summary>
+        <pre style="background:#f5f5f5; padding:10px; border-radius:6px; font-size:11px; max-height:120px; overflow:auto; margin-top:8px;">{{ raw_text }}</pre>
+    </details>
+    {% endif %}
+    
     <div class="row g-2 mt-2">
         {% for k,v in parsed.items() %}
         <div class="col-6">
             <small style="color:#999;">{{ k|replace('_',' ') }}</small><br>
-            <input type="{% if k in ['loan_amount','down_payment','total_ar','tenure_months'] %}number{% elif k == 'tanggal_mulai' %}date{% else %}text{% endif %}" 
-                   value="{{ v }}" class="form-control form-control-sm live-input" 
-                   data-field="{{ k }}" oninput="recalculateLive()">
+            <strong>
+                {% if k in ['loan_amount','down_payment','total_ar','principal','total_interest','monthly_installment','outstanding_balance'] %}
+                    Rp {{ "{:,.0f}".format(v) }}
+                {% elif k == 'interest_rate' %}
+                    {{ "%.1f"|format(v*100) }}%
+                {% else %}
+                    {{ v }}
+                {% endif %}
+            </strong>
         </div>
         {% endfor %}
     </div>
     
-    <!-- LIVE CALCULATION BOX -->
-    <div id="liveCalcBox" style="margin-top:16px; padding:16px; background:linear-gradient(135deg, #f0fdf4, #dcfce7); border-radius:12px; border:2px solid #86efac;">
-        <h6 style="color:#166534; margin-bottom:8px;">🧮 Auto-Calculated</h6>
-        <div class="row g-2">
-            <div class="col-6"><small>Principal</small><br><strong id="livePr">Rp 0</strong></div>
-            <div class="col-6"><small>Monthly Installment</small><br><strong style="color:#DC3545; font-size:18px;" id="liveMI">Rp 0</strong></div>
-            <div class="col-6"><small>Total Interest</small><br><strong id="liveTI">Rp 0</strong></div>
-            <div class="col-6"><small>Outstanding</small><br><strong id="liveOS">Rp 0</strong></div>
-        </div>
-        <div id="liveWarnings" style="margin-top:8px;"></div>
+    {% if calculations %}
+    <div class="mt-3 p-3" style="background:#d4edda; border-radius:8px;">
+        <strong>🧮 Auto-Calculated:</strong><br>
+        Monthly Installment: <strong style="color:#DC3545; font-size:18px;">Rp {{ "{:,.0f}".format(calculations.monthly_installment) }}</strong><br>
+        Total Interest: Rp {{ "{:,.0f}".format(calculations.total_interest) }} | 
+        Outstanding: Rp {{ "{:,.0f}".format(calculations.outstanding_balance) }}
     </div>
+    {% endif %}
     
-    <button onclick="submitWithLiveData()" class="btn-block btn-red mt-3">✅ Submit (Auto-Approved)</button>
-    <a href="/hr/scan" class="btn-block btn-outline mt-2">Scan Again</a>
+    <button onclick="confirmSubmit()" class="btn-block btn-red mt-3">✅ Confirm & Submit (Auto-Approved)</button>
+    <a href="/hr/scan" class="btn-block btn-outline mt-2">📸 Scan Another</a>
 </div>
 
 <script>
-function getFieldValue(field) {
-    const el = document.querySelector(`[data-field="${field}"]`);
-    return el ? el.value : 0;
-}
-
-function recalculateLive() {
-    const loan = parseFloat(getFieldValue('loan_amount')) || 0;
-    const dp = parseFloat(getFieldValue('down_payment')) || 0;
-    const tenor = parseInt(getFieldValue('tenure_months')) || 12;
-    let rate = parseFloat(getFieldValue('interest_rate')) || 0.05;
-    if (rate > 1) rate = rate / 100;
-    
-    if (loan <= 0 || dp > loan) return;
-    
-    const principal = loan - dp;
-    const totalInt = principal * rate * (tenor / 12);
-    const total = principal + totalInt;
-    const monthly = total / tenor;
-    
-    document.getElementById('livePr').textContent = 'Rp ' + Math.round(principal).toLocaleString('id-ID');
-    document.getElementById('liveMI').textContent = 'Rp ' + Math.round(monthly).toLocaleString('id-ID');
-    document.getElementById('liveTI').textContent = 'Rp ' + Math.round(totalInt).toLocaleString('id-ID');
-    document.getElementById('liveOS').textContent = 'Rp ' + Math.round(total).toLocaleString('id-ID');
-    
-    // Warnings
-    let w = '';
-    const dpPct = (dp/loan)*100;
-    if (dpPct < 20) w += '<div class="alert alert-warning py-1 px-2 mb-1" style="font-size:11px;">⚠️ DP rendah: ' + dpPct.toFixed(0) + '%</div>';
-    if (tenor > 48) w += '<div class="alert alert-warning py-1 px-2 mb-1" style="font-size:11px;">⚠️ Tenor panjang: ' + tenor + ' bulan</div>';
-    if (principal <= 0) w += '<div class="alert alert-danger py-1 px-2" style="font-size:11px;">🚨 DP > Loan!</div>';
-    if (!w) w = '<div class="alert alert-success py-1 px-2" style="font-size:11px;">✅ Data terlihat normal</div>';
-    document.getElementById('liveWarnings').innerHTML = w;
-}
-
-function submitWithLiveData() {
-    const data = {};
-    document.querySelectorAll('.live-input').forEach(el => {
-        let val = el.value;
-        if (el.type === 'number') val = parseFloat(val) || 0;
-        data[el.dataset.field] = val;
-    });
-    
+function confirmSubmit() {
+    const data = {{ parsed|tojson }};
     data.nama_lengkap = data.nama_lengkap || '';
     data.loan_type = data.loan_type || 'Regular';
-    data.cabang = data.cabang || '{{ session.name }}';
-    data.document_source = 'HR Scan';
+    data.cabang = data.cabang || 'HR Office';
+    data.document_source = 'Camera Scan';
+    data.ocr_confidence = {{ (confidence.values()|sum // confidence|length) if confidence else 85 }};
     
     fetch('/api/hr-submit', {
         method: 'POST',
@@ -137,14 +203,14 @@ function submitWithLiveData() {
     .then(r => r.json())
     .then(res => {
         if (res.status === 'success') {
-            alert('✅ Submitted & Approved!\nInstallment: Rp ' + res.calculations.monthly_installment.toLocaleString());
+            alert('✅ Submitted!\n\nMonthly Installment: Rp ' + res.calculations.monthly_installment.toLocaleString());
             window.location.href = '/hr';
+        } else {
+            alert('Error: ' + (res.message || 'Unknown error'));
         }
-    });
+    })
+    .catch(err => alert('Network error: ' + err));
 }
-
-// Calculate on load
-recalculateLive();
 </script>
 {% endif %}
 {% endblock %}
