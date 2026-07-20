@@ -55,7 +55,7 @@
                     </td>
                     <td class="text-center">
                         {% if s.status_approval == 'Pending' %}
-                            <button onclick="approve({{ s.id }})" class="btn btn-sm btn-success" title="Approve">✓</button>
+                            <button onclick="location.href='/hr/review/{{ s.id }}'" style="cursor:pointer;" class="btn btn-sm btn-success" title="Approve">✓</button>
                             <button onclick="reject({{ s.id }})" class="btn btn-sm btn-danger" title="Reject">✕</button>
                         {% endif %}
                     </td>

@@ -52,27 +52,99 @@ function upFile(f){document.querySelector('.row').style.display='none';document.
 {% else %}
 <div class="card-stat blue" style="text-align:left;">
     <h5>✅ Scanned Data</h5>
+    
+    <!-- EDITABLE FIELDS WITH LIVE CALC -->
     <div class="row g-2 mt-2">
         {% for k,v in parsed.items() %}
-        <div class="col-6"><small style="color:#999;">{{ k }}</small><br><strong>{{ v }}</strong></div>
+        <div class="col-6">
+            <small style="color:#999;">{{ k|replace('_',' ') }}</small><br>
+            <input type="{% if k in ['loan_amount','down_payment','total_ar','tenure_months'] %}number{% elif k == 'tanggal_mulai' %}date{% else %}text{% endif %}" 
+                   value="{{ v }}" class="form-control form-control-sm live-input" 
+                   data-field="{{ k }}" oninput="recalculateLive()">
+        </div>
         {% endfor %}
     </div>
-    {% if calculations %}
-    <div class="mt-2 p-2" style="background:#d4edda;border-radius:8px;">
-        <strong>🧮 Auto-Calculated:</strong> Installment: Rp {{ "{:,.0f}".format(calculations.monthly_installment) }}
+    
+    <!-- LIVE CALCULATION BOX -->
+    <div id="liveCalcBox" style="margin-top:16px; padding:16px; background:linear-gradient(135deg, #f0fdf4, #dcfce7); border-radius:12px; border:2px solid #86efac;">
+        <h6 style="color:#166534; margin-bottom:8px;">🧮 Auto-Calculated</h6>
+        <div class="row g-2">
+            <div class="col-6"><small>Principal</small><br><strong id="livePr">Rp 0</strong></div>
+            <div class="col-6"><small>Monthly Installment</small><br><strong style="color:#DC3545; font-size:18px;" id="liveMI">Rp 0</strong></div>
+            <div class="col-6"><small>Total Interest</small><br><strong id="liveTI">Rp 0</strong></div>
+            <div class="col-6"><small>Outstanding</small><br><strong id="liveOS">Rp 0</strong></div>
+        </div>
+        <div id="liveWarnings" style="margin-top:8px;"></div>
     </div>
-    {% endif %}
-    <button onclick="submitHR()" class="btn-block btn-red mt-3">✅ Submit (Auto-Approved)</button>
+    
+    <button onclick="submitWithLiveData()" class="btn-block btn-red mt-3">✅ Submit (Auto-Approved)</button>
     <a href="/hr/scan" class="btn-block btn-outline mt-2">Scan Again</a>
 </div>
+
 <script>
-function submitHR(){
-    const d={{ parsed|tojson }};
-    d.nama_lengkap=d.nama_lengkap||'';d.loan_type=d.loan_type||'Regular';
-    d.cabang=d.cabang||'{{ session.name }}';d.document_source='HR Scan';
-    fetch('/api/hr-submit',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(d)})
-    .then(r=>r.json()).then(res=>{if(res.status=='success'){alert('Submitted & Approved!');window.location.href='/hr';}});
+function getFieldValue(field) {
+    const el = document.querySelector(`[data-field="${field}"]`);
+    return el ? el.value : 0;
 }
+
+function recalculateLive() {
+    const loan = parseFloat(getFieldValue('loan_amount')) || 0;
+    const dp = parseFloat(getFieldValue('down_payment')) || 0;
+    const tenor = parseInt(getFieldValue('tenure_months')) || 12;
+    let rate = parseFloat(getFieldValue('interest_rate')) || 0.05;
+    if (rate > 1) rate = rate / 100;
+    
+    if (loan <= 0 || dp > loan) return;
+    
+    const principal = loan - dp;
+    const totalInt = principal * rate * (tenor / 12);
+    const total = principal + totalInt;
+    const monthly = total / tenor;
+    
+    document.getElementById('livePr').textContent = 'Rp ' + Math.round(principal).toLocaleString('id-ID');
+    document.getElementById('liveMI').textContent = 'Rp ' + Math.round(monthly).toLocaleString('id-ID');
+    document.getElementById('liveTI').textContent = 'Rp ' + Math.round(totalInt).toLocaleString('id-ID');
+    document.getElementById('liveOS').textContent = 'Rp ' + Math.round(total).toLocaleString('id-ID');
+    
+    // Warnings
+    let w = '';
+    const dpPct = (dp/loan)*100;
+    if (dpPct < 20) w += '<div class="alert alert-warning py-1 px-2 mb-1" style="font-size:11px;">⚠️ DP rendah: ' + dpPct.toFixed(0) + '%</div>';
+    if (tenor > 48) w += '<div class="alert alert-warning py-1 px-2 mb-1" style="font-size:11px;">⚠️ Tenor panjang: ' + tenor + ' bulan</div>';
+    if (principal <= 0) w += '<div class="alert alert-danger py-1 px-2" style="font-size:11px;">🚨 DP > Loan!</div>';
+    if (!w) w = '<div class="alert alert-success py-1 px-2" style="font-size:11px;">✅ Data terlihat normal</div>';
+    document.getElementById('liveWarnings').innerHTML = w;
+}
+
+function submitWithLiveData() {
+    const data = {};
+    document.querySelectorAll('.live-input').forEach(el => {
+        let val = el.value;
+        if (el.type === 'number') val = parseFloat(val) || 0;
+        data[el.dataset.field] = val;
+    });
+    
+    data.nama_lengkap = data.nama_lengkap || '';
+    data.loan_type = data.loan_type || 'Regular';
+    data.cabang = data.cabang || '{{ session.name }}';
+    data.document_source = 'HR Scan';
+    
+    fetch('/api/hr-submit', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(data)
+    })
+    .then(r => r.json())
+    .then(res => {
+        if (res.status === 'success') {
+            alert('✅ Submitted & Approved!\nInstallment: Rp ' + res.calculations.monthly_installment.toLocaleString());
+            window.location.href = '/hr';
+        }
+    });
+}
+
+// Calculate on load
+recalculateLive();
 </script>
 {% endif %}
 {% endblock %}

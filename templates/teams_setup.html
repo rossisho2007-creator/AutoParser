@@ -1,0 +1,56 @@
+{% extends "base.html" %}
+{% block title %}Teams Setup{% endblock %}
+{% block content %}
+
+<h4 style="color:var(--blue);">📋 Microsoft Teams List Setup Guide</h4>
+
+<div class="card-stat blue mt-3" style="text-align:left;">
+    <h5>Step 1: Create Teams List</h5>
+    <ol>
+        <li>Open Microsoft Teams</li>
+        <li>Go to your channel → Click "+" → Select "Lists"</li>
+        <li>Create a new list with these columns:</li>
+    </ol>
+    <div class="table-responsive">
+        <table class="table table-sm">
+            <thead><tr><th>Column</th><th>Type</th></tr></thead>
+            <tbody>
+                <tr><td>NPK</td><td>Text</td></tr>
+                <tr><td>KPM ID</td><td>Text</td></tr>
+                <tr><td>Nama Lengkap</td><td>Text</td></tr>
+                <tr><td>Loan Amount</td><td>Currency</td></tr>
+                <tr><td>Monthly Installment</td><td>Currency</td></tr>
+                <tr><td>Branch</td><td>Text</td></tr>
+                <tr><td>Status</td><td>Choice (Pending, Approved, Rejected)</td></tr>
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<div class="card-stat green mt-3" style="text-align:left;">
+    <h5>Step 2: Connect AutoInput Pro</h5>
+    <p>Use <strong>Power Automate</strong> to sync:</p>
+    <ol>
+        <li>Go to <a href="https://make.powerautomate.com" target="_blank">make.powerautomate.com</a></li>
+        <li>Create new flow → "When HTTP request is received"</li>
+        <li>Add action → "Create item in SharePoint List"</li>
+        <li>Map the fields from our API to your Teams List</li>
+    </ol>
+    
+    <div class="alert alert-info mt-2">
+        <strong>API Endpoint:</strong><br>
+        <code>GET /api/teams-list</code> - Returns all submissions in Teams-compatible format
+    </div>
+</div>
+
+<div class="card-stat mt-3" style="text-align:left; border-top-color:#FFC107;">
+    <h5>Step 3: Add as Teams Tab</h5>
+    <ol>
+        <li>In Teams channel → Click "+"</li>
+        <li>Select "Website"</li>
+        <li>Paste your AutoInput Pro URL</li>
+        <li>Name: "AutoInput Pro"</li>
+    </ol>
+    <p>✅ Done! All submissions will appear in your Teams List automatically.</p>
+</div>
+{% endblock %}
