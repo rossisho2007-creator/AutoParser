@@ -1,0 +1,118 @@
+{% extends "base.html" %}
+{% block title %}Kalkulator Pinjaman{% endblock %}
+{% block content %}
+
+<div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px;">
+    <h5 style="color:var(--blue); font-weight:700;">🧮 Kalkulator Pinjaman</h5>
+    <a href="/dashboard" class="btn btn-outline btn-sm">← Kembali</a>
+</div>
+
+<div class="card">
+    <div class="alert alert-light mb-3" style="font-size:12px; border-radius:10px; background:#F8F9FA;">
+        <strong>📋 Pilih program untuk otomatis, atau isi manual</strong>
+    </div>
+    
+    <div class="mb-3">
+        <label class="form-label">Tipe Program</label>
+        <select onchange="applyProgram(this.value)" style="font-size:15px;">
+            <option value="">Kustom (isi manual)</option>
+            <option value="field">🏍️ Operasional — 16JT, 0%, 36bln, Tanpa DP</option>
+            <option value="office">💼 Non-Lapangan — Variabel, COF+1%, Maks 48bln, DP 10%</option>
+        </select>
+    </div>
+    
+    <div class="row g-2 mb-3">
+        <div class="col-6">
+            <label class="form-label">Jumlah Pinjaman (Rp)</label>
+            <input type="text" inputmode="numeric" pattern="[0-9]*" id="loan" placeholder="16000000" oninput="calc()">
+        </div>
+        <div class="col-6">
+            <label class="form-label">Uang Muka (Rp)</label>
+            <input type="text" inputmode="numeric" pattern="[0-9]*" id="dp" placeholder="0" oninput="calc()">
+        </div>
+        <div class="col-4">
+            <label class="form-label">Tenor (bulan)</label>
+            <input type="text" inputmode="numeric" pattern="[0-9]*" id="tenor" value="36" oninput="calc()">
+        </div>
+        <div class="col-4">
+            <label class="form-label">Suku Bunga (%)</label>
+            <input type="text" inputmode="decimal" pattern="[0-9.]*" id="rate" value="5" step="0.1" oninput="calc()">
+        </div>
+        <div class="col-4">
+            <label class="form-label">Tanggal Mulai</label>
+            <input type="date" id="startDate" oninput="calc()">
+        </div>
+    </div>
+    
+    <button onclick="calc()" class="btn btn-red btn-full" style="margin-bottom:14px;">Hitung</button>
+    
+    <div id="results" style="display:none; padding:16px; background:#F0FDF4; border-radius:10px; border:1px solid #BBF7D0;">
+        <h6 style="color:#166534; font-weight:700; margin-bottom:12px;">📊 Hasil</h6>
+        <div class="row g-3">
+            <div class="col-6"><small style="color:#666;">Pokok</small><br><strong id="rPokok">Rp 0</strong></div>
+            <div class="col-6"><small style="color:#666;">Total Bunga</small><br><strong id="rInterest">Rp 0</strong></div>
+            <div class="col-6"><small style="color:#666;">Angsuran Bulanan</small><br><strong style="color:#DC3545; font-size:18px;" id="rMonthly">Rp 0</strong></div>
+            <div class="col-6"><small style="color:#666;">Total Pembayaran</small><br><strong id="rTotal">Rp 0</strong></div>
+        </div>
+        <div id="schedule" style="margin-top:14px; font-size:12px;"></div>
+    </div>
+</div>
+
+<script>
+function applyProgram(type) {
+    if (type === 'field') {
+        document.getElementById('loan').value = 16000000;
+        document.getElementById('dp').value = 0;
+        document.getElementById('tenor').value = 36;
+        document.getElementById('rate').value = 0;
+        document.getElementById('loan').readOnly = true;
+        document.getElementById('dp').readOnly = true;
+        document.getElementById('tenor').readOnly = true;
+        document.getElementById('rate').readOnly = true;
+    } else if (type === 'office') {
+        document.getElementById('loan').value = '';
+        document.getElementById('dp').value = '';
+        document.getElementById('tenor').value = 48;
+        document.getElementById('rate').value = 7;
+        document.getElementById('loan').readOnly = false;
+        document.getElementById('dp').readOnly = false;
+        document.getElementById('tenor').readOnly = false;
+        document.getElementById('rate').readOnly = false;
+    } else {
+        document.getElementById('loan').readOnly = false;
+        document.getElementById('dp').readOnly = false;
+        document.getElementById('tenor').readOnly = false;
+        document.getElementById('rate').readOnly = false;
+    }
+    calc();
+}
+
+function calc() {
+    const loan = parseFloat(document.getElementById('loan').value) || 0;
+    const dp = parseFloat(document.getElementById('dp').value) || 0;
+    const tenor = parseInt(document.getElementById('tenor').value) || 36;
+    const rate = (parseFloat(document.getElementById('rate').value) || 0) / 100;
+    
+    if (loan <= 0) { document.getElementById('results').style.display = 'none'; return; }
+    
+    const p = loan - dp;
+    const ti = p * rate * (tenor / 12);
+    const monthly = (p + ti) / tenor;
+    const total = monthly * tenor;
+    
+    document.getElementById('results').style.display = 'block';
+    document.getElementById('rPokok').textContent = 'Rp ' + Math.round(p).toLocaleString('id-ID');
+    document.getElementById('rInterest').textContent = 'Rp ' + Math.round(ti).toLocaleString('id-ID');
+    document.getElementById('rMonthly').textContent = 'Rp ' + Math.round(monthly).toLocaleString('id-ID');
+    document.getElementById('rTotal').textContent = 'Rp ' + Math.round(total).toLocaleString('id-ID');
+    
+    // End date
+    const startDate = document.getElementById('startDate').value;
+    if (startDate) {
+        const end = new Date(startDate);
+        end.setMonth(end.getMonth() + tenor);
+        document.getElementById('schedule').innerHTML = '<small style="color:#666;">Start: ' + startDate + ' → End: ' + end.toLocaleDateString('id-ID', {month:'short', year:'numeric'}) + '</small>';
+    }
+}
+</script>
+{% endblock %}

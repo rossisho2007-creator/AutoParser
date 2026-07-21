@@ -1,0 +1,31 @@
+{% extends "base.html" %}
+{% block title %}Import Data{% endblock %}
+{% block content %}
+
+<div style="max-width:600px; margin:0 auto;">
+    <div style="display:flex; justify-content:space-between; margin-bottom:16px;">
+        <div>
+            <h4 style="color:var(--blue);">📥 Import Existing Data</h4>
+            <small style="color:#666;">Upload your existing Excel file</small>
+        </div>
+        <a href="/dashboard" class="btn btn-sm btn-outline-secondary">← Back</a>
+    </div>
+
+    <div class="card-stat blue" style="text-align:left;">
+        <form method="POST" enctype="multipart/form-data">
+            <div class="upload-box mb-3" onclick="document.getElementById('excelFile').click()">
+                <div style="font-size:40px;">📊</div>
+                <p style="font-weight:600;">Click to Select Excel File</p>
+                <small style="color:#999;">.xlsx or .xls</small>
+            </div>
+            <input type="file" name="excel_file" id="excelFile" accept=".xlsx,.xls" 
+                   style="display:none;" onchange="this.form.submit()">
+        </form>
+        
+        <div class="alert alert-info" style="font-size:12px;">
+            <strong>📋 Expected columns:</strong> Npk, Nama, Poliaman, Tenor, Angsuran, AAB, Cabang<br>
+            <small>Duplicate NPKs will be skipped automatically.</small>
+        </div>
+    </div>
+</div>
+{% endblock %}
