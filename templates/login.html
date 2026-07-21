@@ -1,102 +1,76 @@
 {% extends "base.html" %}
-{% block title %}Login - TAF AutoScanner{% endblock %}
+{% block title %}Masuk{% endblock %}
 {% block content %}
 
-<div style="max-width:450px; margin:20px auto;">
-    <div class="text-center mb-3">
-        <span class="logo-container" style="display:inline-block; background:white; padding:8px 16px; border-radius:8px;">
-            <img src="{{ url_for('static', filename='logo.png') }}" alt="TAF" style="max-height:45px;" onerror="this.style.display='none'">
-        </span>
-        <h3 style="color:var(--blue); margin-top:10px;">TAF AutoScanner</h3>
-        <p style="color:#666; font-size:13px;">Document Scanning & Processing System</p>
+<div style="max-width:400px; margin:60px auto;">
+    <div class="text-center mb-4">
+        <img src="{{ url_for('static', filename='logo.png') }}" alt="Logo" style="max-height:55px;" onerror="this.style.display='none'">
+        <h4 style="color:var(--blue); margin-top:12px; font-weight:700;">Portal Karyawan</h4>
+        <p style="color:#999; font-size:13px;">Masuk untuk melanjutkan</p>
     </div>
 
-    <div class="card-stat blue" style="text-align:left;">
+    <div class="card" style="padding:24px;">
         <form method="POST">
-            <!-- Username / NPK -->
             <div class="mb-3">
-                <label class="form-label fw-bold">👤 Username / NPK</label>
-                <input type="text" name="username" class="form-control form-control-lg" 
-                       placeholder="Enter username or NPK number" required autofocus
-                       style="font-size:16px; text-align:center;">
-                <small style="color:#999;">Any 2+ characters accepted</small>
+                <label class="form-label">Nama Pengguna / NPK <span style="color:var(--red);">*</span></label>
+                <input type="text" name="username" class="form-control" placeholder="Masukkan nama pengguna atau NPK" required autofocus>
             </div>
             
-            <!-- Name (optional for non-demo) -->
             <div class="mb-3">
-                <label class="form-label fw-bold">📛 Display Name <small style="color:#999;">(optional)</small></label>
-                <input type="text" name="name" class="form-control" 
-                       placeholder="Your full name">
+                <label class="form-label">Nama Lengkap <span style="color:var(--red);">*</span></label>
+                <input type="text" name="name" class="form-control" placeholder="Masukkan nama lengkap" required>
             </div>
             
-            <!-- Password (only needed for demo accounts) -->
             <div class="mb-3">
-                <label class="form-label fw-bold">🔒 Password <small style="color:#999;">(for demo accounts)</small></label>
-                <input type="password" name="password" class="form-control" 
-                       placeholder="Leave blank if using NPK login">
+                <label class="form-label">Kata Sandi</label>
+                <div style="position:relative;">
+                    <input type="password" name="password" id="password" class="form-control" placeholder="Kosongkan untuk login NPK" style="padding-right:45px;">
+                    <button type="button" onclick="togglePassword()" style="position:absolute; right:10px; top:50%; transform:translateY(-50%); background:none; border:none; color:#999; cursor:pointer; font-size:18px; min-height:auto; padding:5px;">
+                        <i class="fas fa-eye" id="eyeIcon"></i>
+                    </button>
+                </div>
+                <small style="color:#999;">Hanya untuk akun demo (hr/hr123)</small>
             </div>
             
-            <!-- Role Selection -->
             <div class="mb-3">
-                <label class="form-label fw-bold">👔 Role</label>
-                <select name="role" class="form-control">
-                    <option value="staff">Staff / FRO / CSO</option>
-                    <option value="manager">Manager / BM / SAH / SEH</option>
-                    <option value="hr">HR Department</option>
+                <label class="form-label">Peran <span style="color:var(--red);">*</span></label>
+                <select name="role" class="form-control" required>
+                    <option value="">Pilih peran...</option>
+                    <option value="staff">Staf</option>
+                    <option value="manager">Manajer</option>
+                    <option value="hr">HR</option>
                 </select>
             </div>
             
-            <!-- Branch Selection -->
-            <div class="mb-3">
-                <label class="form-label fw-bold">🏢 Cabang (Branch)</label>
-                <select name="branch" class="form-control">
-                    <option value="">Select branch...</option>
-                    <optgroup label="━━ SUMATRA ━━">
-                        <option>Banda Aceh</option><option>Medan</option><option>Medan - Iskandar</option>
-                        <option>Padang</option><option>Pekanbaru</option><option>Batam</option>
-                        <option>Duri</option><option>Jambi</option><option>Palembang</option>
-                        <option>Lampung</option><option>Bengkulu</option>
-                    </optgroup>
-                    <optgroup label="━━ JAKARTA & JAVA BARAT ━━">
-                        <option>Jakarta Central</option><option>Jakarta South</option>
-                        <option>Jakarta North</option><option>Kelapa Gading</option>
-                        <option>Bandung</option><option>Bekasi</option><option>Bekasi - Revo Town</option>
-                        <option>Bogor</option><option>Depok</option><option>Tangerang</option>
-                        <option>BSD City</option><option>Karawang</option><option>Cirebon</option>
-                        <option>Serang</option>
-                    </optgroup>
-                    <optgroup label="━━ JAVA TENGAH & TIMUR ━━">
-                        <option>Semarang 3</option><option>Yogyakarta</option><option>Tegal</option>
-                        <option>Surabaya - Merr</option><option>Surabaya - Puncak Permai</option>
-                        <option>Malang</option><option>Kediri</option><option>Jember</option>
-                    </optgroup>
-                    <optgroup label="━━ KALIMANTAN ━━">
-                        <option>Balikpapan</option><option>Samarinda</option>
-                        <option>Banjarmasin</option><option>Pontianak</option>
-                    </optgroup>
-                    <optgroup label="━━ SULAWESI ━━">
-                        <option>Makassar</option><option>Manado</option>
-                        <option>Kendari</option><option>Palu</option>
-                    </optgroup>
-                    <optgroup label="━━ BALI & NUSA TENGGARA ━━">
-                        <option>Denpasar</option>
-                    </optgroup>
+            <div class="mb-4">
+                <label class="form-label">Cabang <span style="color:var(--red);">*</span></label>
+                <select name="branch" class="form-control" required>
+                    <option value="">Pilih cabang...</option>
+                    <option>Jakarta Pusat</option><option>Jakarta Selatan</option><option>Jakarta Utara</option>
+                    <option>Bandung</option><option>Surabaya</option><option>Medan</option>
+                    <option>Makassar</option><option>Denpasar</option><option>Palembang</option>
+                    <option>Balikpapan</option><option>Batam</option><option>Yogyakarta</option>
+                    <option>Semarang</option><option>Malang</option><option>Bekasi</option>
                 </select>
             </div>
             
-            <button type="submit" class="btn-block btn-red" style="font-size:16px;">
-                <i class="fas fa-sign-in-alt"></i> Sign In
+            <button type="submit" class="btn btn-red btn-full" style="font-size:16px; padding:14px; border-radius:50px; font-weight:700;">
+                Masuk
             </button>
         </form>
     </div>
     
-    <div class="text-center mt-3">
-        <small style="color:#666;">
-            <strong>🔑 Demo Accounts (use password):</strong><br>
-            <code>hr</code> / <code>hr123</code> &nbsp;|&nbsp; 
-            <code>manager</code> / <code>mgr123</code> &nbsp;|&nbsp; 
-            <code>staff</code> / <code>staff123</code>
-        </small>
-    </div>
+    <p class="text-center mt-3" style="font-size:12px; color:#bbb;">
+        Demo: hr/hr123 · staff/staff123
+    </p>
 </div>
+
+<script>
+function togglePassword() {
+    const pw = document.getElementById('password');
+    const eye = document.getElementById('eyeIcon');
+    if (pw.type === 'password') { pw.type = 'text'; eye.className = 'fas fa-eye-slash'; }
+    else { pw.type = 'password'; eye.className = 'fas fa-eye'; }
+}
+</script>
 {% endblock %}

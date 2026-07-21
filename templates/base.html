@@ -5,120 +5,81 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="theme-color" content="#FFFFFF">
-    <title>{% block title %}TAF AutoScanner{% endblock %}</title>
+    <title>{% block title %}Portal Karyawan{% endblock %}</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
     <style>
-        :root { --red: #DC3545; --blue: #1A3A5C; --white: #FFFFFF; --light-gray: #F8F9FA; --border: #E5E7EB; }
+        :root { --red: #DC3545; --blue: #1A3A5C; }
         * { margin:0; padding:0; box-sizing:border-box; }
-        body { 
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; 
-            background: #FFFFFF;  /* PURE WHITE */
-            min-height: 100vh; 
-            color: #333;
-        }
+        body { font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif; background: #FFFFFF; min-height: 100vh; color: #333; }
         
-        .navbar { 
-            background: #FFFFFF; 
-            border-bottom: 1px solid var(--border); 
-            padding: 10px 16px; 
-            position: sticky; 
-            top: 0; 
-            z-index: 100; 
-        }
-        .navbar-inner { display:flex; justify-content:space-between; align-items:center; max-width:1000px; margin:0 auto; }
-        .navbar-brand { font-weight: 700; font-size: 18px; color: var(--blue); text-decoration: none; display: flex; align-items: center; gap: 10px; }
+        .topbar { background: #FFFFFF; border-bottom: 1px solid #E5E7EB; padding: 10px 20px; display: flex; justify-content: space-between; align-items: center; }
+        .topbar-left { display: flex; align-items: center; gap: 10px; }
+        .topbar-left img { height: 30px; }
+        .topbar-left span { font-weight: 600; font-size: 15px; color: var(--blue); }
+        .topbar-right { display: flex; align-items: center; gap: 12px; }
+        .topbar-user { font-size: 13px; color: #666; text-align: right; line-height: 1.3; }
+        .topbar-user strong { color: #333; }
+        .topbar-avatar { width: 34px; height: 34px; border-radius: 50%; background: var(--blue); color: white; display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: 14px; }
+        .topbar-logout { color: #999; text-decoration: none; font-size: 12px; }
         
-        .desktop-nav { display: none; }
-        @media (min-width: 768px) {
-            .desktop-nav { display: flex; gap: 6px; }
-            .desktop-nav a { padding: 8px 16px; border-radius: 8px; text-decoration: none; color: #555; font-weight: 500; font-size: 14px; transition: .2s; }
-            .desktop-nav a:hover { background: var(--light-gray); }
-        }
-        
-        .mobile-nav { 
-            position: fixed; bottom: 0; left: 0; right: 0; 
-            background: #FFFFFF; 
-            border-top: 1px solid var(--border); 
-            display: flex; justify-content: space-around; 
-            padding: 4px 0 8px; z-index: 100; 
-        }
-        .mobile-nav a { text-decoration: none; color: #888; text-align: center; font-size: 10px; padding: 2px 8px; }
-        .mobile-nav a i { font-size: 20px; display: block; margin-bottom: 1px; }
-        @media (min-width: 768px) { .mobile-nav { display: none; } }
-        
-        .main-content { padding: 16px; max-width: 1000px; margin: 0 auto; }
-        @media (min-width: 768px) { .main-content { padding: 30px; } }
+        .main-content { padding: 20px; max-width: 800px; margin: 0 auto; }
         @media (max-width: 767px) { .main-content { padding: 12px; padding-bottom: 70px; } }
         
-        .card-stat { 
-            background: #FFFFFF; 
-            border: 1px solid var(--border);
-            border-radius: 12px; 
-            padding: 20px; 
-            border-top: 4px solid var(--red); 
-            text-align: center; 
-        }
-        @media (max-width: 767px) { .card-stat { padding: 14px; } }
-        .card-stat.blue { border-top-color: var(--blue); }
-        .card-stat.green { border-top-color: #28A745; }
-        .card-stat.yellow { border-top-color: #FFC107; }
+        .bottom-nav { position: fixed; bottom: 0; left: 0; right: 0; background: #FFFFFF; border-top: 1px solid #E5E7EB; display: flex; justify-content: space-around; padding: 5px 0 8px; z-index: 100; }
+        .bottom-nav a { text-decoration: none; color: #999; text-align: center; font-size: 10px; padding: 4px 12px; }
+        .bottom-nav a i { font-size: 20px; display: block; margin-bottom: 2px; }
+        .bottom-nav a.active { color: var(--red); }
+        @media (min-width: 768px) { .bottom-nav { display: none; } }
         
-        .btn-block { display: block; width: 100%; padding: 14px; border-radius: 10px; font-weight: 600; font-size: 16px; border: none; cursor: pointer; text-align: center; text-decoration: none; transition: .2s; }
-        @media (max-width: 767px) { .btn-block { padding: 12px; font-size: 14px; } }
+        .card { background: #FFFFFF; border: 1px solid #E5E7EB; border-radius: 14px; padding: 22px; margin-bottom: 14px; }
+        .stat-box { background: #FFFFFF; border: 1px solid #E5E7EB; border-radius: 12px; padding: 16px; text-align: center; }
+        
+        .btn { display: inline-flex; align-items: center; justify-content: center; gap: 6px; padding: 14px 28px; border-radius: 50px; font-family: 'Inter', sans-serif; font-weight: 600; font-size: 15px; border: none; cursor: pointer; text-decoration: none; transition: all .2s; letter-spacing: -0.2px; }
+        .btn:hover { transform: translateY(-1px); box-shadow: 0 6px 20px rgba(0,0,0,0.1); }
+        .btn-full { width: 100%; }
         .btn-red { background: var(--red); color: white; }
         .btn-blue { background: var(--blue); color: white; }
         .btn-outline { background: #FFFFFF; color: var(--blue); border: 2px solid var(--blue); }
-        button, .btn, a.btn-block { min-height: 44px; }
+        .btn-sm { padding: 8px 16px; font-size: 12px; }
+        .btn-xs { padding: 6px 12px; font-size: 11px; border-radius: 30px; }
         
-        .upload-box { 
-            border: 2px dashed var(--border); 
-            border-radius: 12px; 
-            padding: 40px 20px; 
-            text-align: center; 
-            cursor: pointer; 
-            transition: .3s; 
-            background: var(--light-gray); 
-        }
-        @media (max-width: 767px) { .upload-box { padding: 30px 15px; } }
-        .upload-box:active, .upload-box:hover { border-color: var(--red); background: #FFF5F5; }
+        .upload-box { border: 2px dashed #E5E7EB; border-radius: 14px; padding: 40px; text-align: center; cursor: pointer; transition: all .3s; }
+        .upload-box:hover { border-color: var(--red); background: #FFF5F5; }
         
         .camera-overlay { position: fixed; top:0; left:0; width:100%; height:100%; background: black; z-index: 9999; display: flex; flex-direction: column; justify-content: center; align-items: center; }
         .camera-overlay video { width: 100%; max-height: 70vh; object-fit: cover; }
         
-        .table-responsive { -webkit-overflow-scrolling: touch; }
-        input, select, textarea { font-size: 16px; }
+        input, select, textarea { font-size: 15px; font-family: 'Inter', sans-serif; border: 1px solid #E5E7EB; border-radius: 10px; padding: 11px 14px; width: 100%; background: #FFFFFF; }
+        input::placeholder, textarea::placeholder { color: #C0C0C0 !important; opacity: 1; }
+        input:focus, select:focus { outline: none; border-color: var(--blue); box-shadow: 0 0 0 3px rgba(26,58,92,0.08); }
         
-        .form-control, .form-select { border: 1px solid var(--border); border-radius: 8px; }
-        .form-control:focus, .form-select:focus { border-color: var(--blue); box-shadow: 0 0 0 3px rgba(26,58,92,0.1); }
+        .form-label { font-weight: 600; font-size: 12px; color: #555; margin-bottom: 4px; display: block; }
     </style>
 </head>
 <body>
-    <nav class="navbar">
-        <div class="navbar-inner">
-            <a href="/dashboard" class="navbar-brand">
-                <img src="{{ url_for('static', filename='logo.png') }}" alt="TAF" style="height:32px;" onerror="this.style.display='none'">
-                TAF AutoScanner
-            </a>
-            <div class="desktop-nav">
-                {% if session.user %}
-                <a href="/dashboard">📊 Dashboard</a>
-                <a href="/scan">📸 Scan</a>
-                <a href="/form">📝 Form</a>
-                {% if session.role in ['hr','manager'] %}
-                <a href="/export-excel">📥 Export</a>
-                {% endif %}
-                <a href="/logout" style="color:var(--red);">Logout</a>
-                {% endif %}
-            </div>
+    {% if session.user %}
+    <div class="topbar">
+        <div class="topbar-left">
+            <img src="{{ url_for('static', filename='logo.png') }}" alt="Logo" onerror="this.style.display='none'">
+            <span>Portal Karyawan</span>
         </div>
-    </nav>
+        <div class="topbar-right">
+            <div class="topbar-user">
+                <strong>{{ session.name }}</strong><br>
+                {{ session.branch }}
+            </div>
+            <div class="topbar-avatar">{{ session.name[:1].upper() }}</div>
+            <a href="/logout" class="topbar-logout"><i class="fas fa-sign-out-alt"></i></a>
+        </div>
+    </div>
+    {% endif %}
     
     <div class="main-content">
         {% with messages = get_flashed_messages(with_categories=true) %}
             {% for cat, msg in messages %}
-                <div class="alert alert-{{ 'success' if cat=='success' else 'warning' if cat=='warning' else 'danger' }} alert-dismissible fade show" role="alert">
+                <div class="alert alert-{{ 'success' if cat=='success' else 'warning' if cat=='warning' else 'danger' }} alert-dismissible fade show py-2" role="alert" style="border-radius:12px;">
                     {{ msg }}
                     <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
                 </div>
@@ -128,13 +89,10 @@
     </div>
     
     {% if session.user %}
-    <div class="mobile-nav">
-        <a href="/dashboard"><i class="fas fa-chart-pie"></i>Home</a>
-        <a href="/scan"><i class="fas fa-camera"></i>Scan</a>
-        <a href="/form"><i class="fas fa-edit"></i>Form</a>
-        {% if session.role in ['hr','manager'] %}
-        <a href="/export-excel"><i class="fas fa-download"></i>Export</a>
-        {% endif %}
+    <div class="bottom-nav">
+        <a href="/dashboard" class="{% if request.path == '/dashboard' %}active{% endif %}"><i class="fas fa-home"></i>Beranda</a>
+        <a href="/scan" class="{% if request.path == '/scan' %}active{% endif %}"><i class="fas fa-camera"></i>Pindai</a>
+        <a href="/form" class="{% if request.path == '/form' %}active{% endif %}"><i class="fas fa-edit"></i>Formulir</a>
     </div>
     {% endif %}
     

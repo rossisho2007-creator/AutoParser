@@ -36,7 +36,7 @@
         </div>
         <div class="col-4">
             <label class="form-label">Suku Bunga (%)</label>
-            <input type="text" inputmode="decimal" pattern="[0-9.]*" id="rate" value="5" step="0.1" oninput="calc()">
+            <input type="text" id="rate" value="5" readonly style="background:#F8F9FA;" value="5" step="0.1" oninput="calc()">
         </div>
         <div class="col-4">
             <label class="form-label">Tanggal Mulai</label>
@@ -91,7 +91,7 @@ function calc() {
     const loan = parseFloat(document.getElementById('loan').value) || 0;
     const dp = parseFloat(document.getElementById('dp').value) || 0;
     const tenor = parseInt(document.getElementById('tenor').value) || 36;
-    const rate = (parseFloat(document.getElementById('rate').value) || 0) / 100;
+    const rate = 0.05;
     
     if (loan <= 0) { document.getElementById('results').style.display = 'none'; return; }
     
