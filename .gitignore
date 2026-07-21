@@ -1,0 +1,25 @@
+# Databases (contain real data)
+*.db
+*.sqlite
+*.sqlite3
+
+# Uploaded documents
+uploads/*
+!uploads/.gitkeep
+
+# Environment variables
+.env
+*.env
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
