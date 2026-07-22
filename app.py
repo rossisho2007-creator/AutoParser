@@ -2,21 +2,35 @@ from flask import Flask, render_template, request, redirect, url_for, flash, sen
 from flask_cors import CORS
 from werkzeug.utils import secure_filename
 import pandas as pd
-import os, re, json, sqlite3
+import os, re, json, sqlite3, uuid
 from datetime import datetime
 from io import BytesIO
 from functools import wraps
 
 app = Flask(__name__, static_folder='static', static_url_path='/static')
 CORS(app)
-app.config['SECRET_KEY'] = 'autopro-2024'
+app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'dev-only-not-secure-change-me')
 app.config['UPLOAD_FOLDER'] = 'uploads'
 os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
 
+ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg'}
+
+def allowed_file(filename):
+    return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
+
 USERS = {
-    'hr': {'password': 'hr123', 'role': 'hr', 'name': 'HR Officer', 'branch': 'Head Office'},
-    'manager': {'password': 'mgr123', 'role': 'manager', 'name': 'Branch Manager', 'branch': 'Jakarta'},
-    'staff': {'password': 'staff123', 'role': 'staff', 'name': 'Staff', 'branch': 'Cabang'},
+    'hr': {
+        'password': os.environ.get('HR_PASSWORD', 'change-me-hr'),
+        'role': 'hr', 'name': 'HR Officer', 'branch': 'Head Office'
+    },
+    'manager': {
+        'password': os.environ.get('MANAGER_PASSWORD', 'change-me-manager'),
+        'role': 'manager', 'name': 'Branch Manager', 'branch': 'Jakarta'
+    },
+    'staff': {
+        'password': os.environ.get('STAFF_PASSWORD', 'change-me-staff'),
+        'role': 'staff', 'name': 'Staff', 'branch': 'Cabang'
+    },
 }
 
 def login_required(f):
@@ -35,6 +49,7 @@ def init_db():
     conn = get_db()
     conn.execute('''CREATE TABLE IF NOT EXISTS submissions (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
+        application_id TEXT,
         npk TEXT, nama_lengkap TEXT, employee_type TEXT,
         jabatan_gol TEXT, departemen_cabang TEXT, cabang TEXT,
         type_motor TEXT, no_rangka TEXT, no_mesin TEXT, bpkb TEXT,
@@ -43,16 +58,30 @@ def init_db():
         principal REAL, total_interest REAL,
         monthly_installment REAL, outstanding_balance REAL,
         remarks TEXT, signature TEXT,
+        email TEXT, phone TEXT,
         status_approval TEXT DEFAULT 'Pending',
+        rejection_reason TEXT,
         submitted_by TEXT, document_source TEXT,
         submitted_date DATETIME DEFAULT CURRENT_TIMESTAMP,
         approved_date DATETIME
     )''')
+    for col, coltype in [('application_id', 'TEXT'), ('email', 'TEXT'),
+                          ('phone', 'TEXT'), ('rejection_reason', 'TEXT')]:
+        try:
+            conn.execute(f'ALTER TABLE submissions ADD COLUMN {col} {coltype}')
+        except sqlite3.OperationalError:
+            pass
     conn.execute('''CREATE TABLE IF NOT EXISTS employee_loans (
         npk TEXT PRIMARY KEY, nama_lengkap TEXT,
+        email TEXT, phone TEXT,
         active_loan_count INTEGER DEFAULT 0,
         total_loans_ever INTEGER DEFAULT 0, last_loan_date DATETIME
     )''')
+    for col, coltype in [('email', 'TEXT'), ('phone', 'TEXT')]:
+        try:
+            conn.execute(f'ALTER TABLE employee_loans ADD COLUMN {col} {coltype}')
+        except sqlite3.OperationalError:
+            pass
     conn.commit(); conn.close()
 
 init_db()
@@ -60,25 +89,23 @@ init_db()
 KNOWN_DEPARTMENTS = ['AR Management', 'Finance', 'Sales', 'Marketing', 'Operation', 'HR Service', 'Collection', 'Credit', 'Service']
 KNOWN_BRANCHES = ['Jakarta Pusat','Jakarta Selatan','Jakarta Utara','Bandung','Surabaya','Medan','Makassar','Denpasar','Palembang','Balikpapan','Batam','Yogyakarta','Semarang','Malang','Bekasi','Tangerang','Depok','Bogor','Padang','Pekanbaru','Samarinda','Banjarmasin','Manado','Lampung','Jambi','Bengkulu','Cirebon','Serang','Karawang','Kediri','Jember','Pontianak','Kendari','Palu','Banda Aceh','Duri','Kelapa Gading','BSD City','Tegal']
 
+_ocr_reader = None
+
+def get_ocr_reader():
+    global _ocr_reader
+    if _ocr_reader is None:
+        import easyocr
+        _ocr_reader = easyocr.Reader(['id', 'en'])
+    return _ocr_reader
+
 def do_ocr(path):
     try:
-        import easyocr
-        reader = easyocr.Reader(['id', 'en'])  # Indonesian + English
+        reader = get_ocr_reader()
         results = reader.readtext(path)
-        text = ' '.join([r[1] for r in results])
-        return text.strip()
-    except:
-        # Fallback to pytesseract if available
-        try:
-            from PIL import Image, ImageEnhance
-            import pytesseract
-            img = Image.open(path)
-            if img.width > 2000: r = 2000/img.width; img = img.resize((2000, int(img.height*r)))
-            img = img.convert('L')
-            img = ImageEnhance.Contrast(img).enhance(3.0)
-            img = ImageEnhance.Sharpness(img).enhance(2.0)
-            return pytesseract.image_to_string(img, lang='eng+ind', config='--psm 6').strip()
-        except: return ''
+        return ' '.join([r[1] for r in results]).strip()
+    except Exception as e:
+        print(f"OCR failed: {e}")
+        return ''
 
 def smart_parse(text):
     if not text: return {}, {}, text
@@ -136,26 +163,18 @@ def generate_excel(export_type='full'):
     output.seek(0)
     return output
 
-# ROUTES
 @app.route('/login', methods=['GET','POST'])
 def login():
     if request.method == 'POST':
         u = request.form.get('username','').strip().lower()
         p = request.form.get('password','')
         if u in USERS and USERS[u]['password'] == p:
-            session['user'] = u; session['role'] = USERS[u]['role']
+            session['user'] = u
+            session['role'] = USERS[u]['role']
             session['name'] = USERS[u]['name']
-            session['branch'] = request.form.get('branch', USERS[u]['branch'])
+            session['branch'] = USERS[u]['branch']
             return redirect(url_for('dashboard'))
-        role = request.form.get('role','staff')
-        name = request.form.get('name','')
-        branch = request.form.get('branch','Jakarta Pusat')
-        if u and len(u) >= 2:
-            session['user'] = u; session['role'] = role
-            session['name'] = name if name else f'User-{u}'
-            session['branch'] = branch
-            return redirect(url_for('dashboard'))
-        flash('Nama pengguna tidak valid', 'danger')
+        flash('Username atau password salah', 'danger')
     return render_template('login.html')
 
 @app.route('/logout')
@@ -190,6 +209,9 @@ def scan():
     if request.method == 'POST':
         file = request.files.get('document')
         if file and file.filename:
+            if not allowed_file(file.filename):
+                flash('File harus berupa gambar (PNG, JPG, JPEG)', 'danger')
+                return render_template('scan.html', parsed=parsed, confidence=conf, raw_text=raw, calculations=calc)
             path = os.path.join(app.config['UPLOAD_FOLDER'], secure_filename(file.filename))
             file.save(path)
             raw = do_ocr(path)
@@ -216,15 +238,16 @@ def submit():
         calc = calculate(data)
         if not calc: return jsonify({'status':'error'}), 400
         data.update(calc)
+        application_id = f"TAF-{datetime.now().strftime('%Y%m%d%H%M%S')}-{uuid.uuid4().hex[:6].upper()}"
         conn = get_db()
         conn.execute('''INSERT INTO submissions 
-            (npk,nama_lengkap,employee_type,jabatan_gol,departemen_cabang,cabang,
+            (application_id,npk,nama_lengkap,employee_type,jabatan_gol,departemen_cabang,cabang,
              type_motor,no_rangka,no_mesin,bpkb,
              loan_amount,down_payment,tenure_months,interest_rate,tanggal_mulai,
              principal,total_interest,monthly_installment,outstanding_balance,
-             remarks,signature,submitted_by,document_source)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)''',
-            (data.get('npk'),data.get('nama_lengkap'),data.get('employee_type','field'),
+             remarks,signature,email,phone,submitted_by,document_source)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)''',
+            (application_id,data.get('npk'),data.get('nama_lengkap'),data.get('employee_type','field'),
              data.get('jabatan_gol'),data.get('departemen_cabang'),data.get('cabang',session.get('branch')),
              data.get('type_motor'),data.get('no_rangka'),data.get('no_mesin'),data.get('bpkb'),
              data.get('loan_amount',16000000),data.get('down_payment',0),
@@ -232,12 +255,13 @@ def submit():
              data.get('principal'),data.get('total_interest'),
              data.get('monthly_installment'),data.get('outstanding_balance'),
              data.get('remarks',''),data.get('signature',''),
+             data.get('email',''),data.get('phone',''),
              session.get('name'),data.get('document_source','Manual')))
-        conn.execute('''INSERT OR REPLACE INTO employee_loans (npk, nama_lengkap, active_loan_count, total_loans_ever, last_loan_date)
-                      VALUES (?,?,COALESCE((SELECT active_loan_count FROM employee_loans WHERE npk=?),0)+1,COALESCE((SELECT total_loans_ever FROM employee_loans WHERE npk=?),0)+1,?)''',
-                   (data.get('npk'),data.get('nama_lengkap'),data.get('npk'),data.get('npk'),datetime.now()))
+        conn.execute('''INSERT OR REPLACE INTO employee_loans (npk, nama_lengkap, email, phone, active_loan_count, total_loans_ever, last_loan_date)
+                      VALUES (?,?,?,?,COALESCE((SELECT active_loan_count FROM employee_loans WHERE npk=?),0)+1,COALESCE((SELECT total_loans_ever FROM employee_loans WHERE npk=?),0)+1,?)''',
+                   (data.get('npk'),data.get('nama_lengkap'),data.get('email',''),data.get('phone',''),data.get('npk'),data.get('npk'),datetime.now()))
         conn.commit(); conn.close()
-        return jsonify({'status':'success','calculations':calc})
+        return jsonify({'status':'success','application_id':application_id,'calculations':calc})
     except Exception as e:
         return jsonify({'status':'error','message':str(e)}),500
 
@@ -254,8 +278,10 @@ def approve(id):
 @login_required
 def reject(id):
     if session.get('role') not in ['hr','manager']: return jsonify({'status':'error'}), 403
+    body = request.get_json(silent=True) or {}
+    reason = body.get('reason', '')
     conn = get_db()
-    conn.execute("UPDATE submissions SET status_approval='Rejected' WHERE id=?",(id,))
+    conn.execute("UPDATE submissions SET status_approval='Rejected', rejection_reason=? WHERE id=?",(reason, id))
     conn.commit(); conn.close()
     return jsonify({'status':'ok'})
 
@@ -271,57 +297,50 @@ def export_approved():
     if session.get('role') not in ['hr','manager']: return redirect(url_for('dashboard'))
     return send_file(generate_excel('approved'), download_name=f'Approved_{datetime.now().strftime("%Y%m%d")}.xlsx')
 
-
 @app.route('/export-edlin/<int:id>')
 @login_required
 def export_edlin(id):
     """Generate EDLIN-formatted Excel matching their exact template"""
     if session.get('role') not in ['hr','manager']:
         return redirect(url_for('dashboard'))
-    
+
     conn = get_db()
     sub = dict(conn.execute("SELECT * FROM submissions WHERE id=?", (id,)).fetchone())
     conn.close()
-    
+
     from openpyxl import Workbook
     from openpyxl.styles import Font, PatternFill, Alignment, Border, Side, numbers
     from openpyxl.utils import get_column_letter
-    
+
     wb = Workbook()
     ws = wb.active
     ws.title = "EDLIN Calculation"
-    
-    # Inputs
+
     otr = float(sub.get('loan_amount', 24389653))
     dp = float(sub.get('down_payment', 6000000))
     tenor = int(sub.get('tenure_months', 36))
-    rate = 0.069  # COF + 1% = 6.9%
+    rate = 0.069
     monthly_rate = rate / 12
-    insurance = otr * 0.053  # ~5.3% insurance
-    
+    insurance = otr * 0.053
+
     sisa = otr - dp
     total_principal = sisa + insurance
     monthly_installment = round(-1 * (total_principal * monthly_rate * (1 + monthly_rate)**tenor) / ((1 + monthly_rate)**tenor - 1), 0)
     total_ar = monthly_installment * tenor
     total_interest = total_ar - total_principal
-    
-    # Style
+
     bold = Font(bold=True, size=11)
     title_font = Font(bold=True, size=14)
     header_fill = PatternFill(start_color='F2F2F2', end_color='F2F2F2', fill_type='solid')
     currency_fmt = '#,##0'
-    
-    # Title
+
     ws['A1'] = 'Skema Jurnal EDLIN'
     ws['A1'].font = title_font
-    
-    # Employee info
     ws['A2'] = 'Nama Karyawan'
     ws['B2'] = sub.get('nama_lengkap', '')
     ws['A3'] = 'NPK'
     ws['B3'] = sub.get('npk', '')
-    
-    # Financial inputs
+
     row = 5
     data = [
         ('OTR', otr), ('DP (min 10%)', dp), ('Sisa', sisa),
@@ -335,48 +354,45 @@ def export_edlin(id):
         ws[f'B{row}'] = value
         ws[f'B{row}'].number_format = currency_fmt
         row += 2
-    
-    # Amortization header
+
     row = 29
     headers = ['Month', 'Principal', 'Interest', 'Installment', 'Balance']
     for i, h in enumerate(headers):
         cell = ws.cell(row=row, column=i+1, value=h)
         cell.font = bold
         cell.fill = header_fill
-    
-    # Amortization schedule
+
     balance = total_principal
     total_principal_paid = 0
     total_interest_paid = 0
-    
-    ws.cell(row=row+1, column=5, value=balance).number_format = currency_fmt  # Month 0
-    
+
+    ws.cell(row=row+1, column=5, value=balance).number_format = currency_fmt
+
     for month in range(1, tenor + 1):
         r = row + 1 + month
         interest_payment = balance * monthly_rate
         principal_payment = monthly_installment - interest_payment
         balance = round(balance - principal_payment, 0)
-        
+
         ws.cell(row=r, column=1, value=month)
         ws.cell(row=r, column=2, value=round(principal_payment)).number_format = currency_fmt
         ws.cell(row=r, column=3, value=round(interest_payment)).number_format = currency_fmt
         ws.cell(row=r, column=4, value=monthly_installment).number_format = currency_fmt
         ws.cell(row=r, column=5, value=max(0, balance)).number_format = currency_fmt
-        
+
         total_principal_paid += principal_payment
         total_interest_paid += interest_payment
-    
-    # Sum row
+
     sum_row = row + 2 + tenor
     ws.cell(row=sum_row, column=2, value=round(total_principal_paid)).number_format = currency_fmt
     ws.cell(row=sum_row, column=3, value=round(total_interest_paid)).number_format = currency_fmt
     ws.cell(row=sum_row, column=2).font = bold
     ws.cell(row=sum_row, column=3).font = bold
-    
+
     output = BytesIO()
     wb.save(output)
     output.seek(0)
-    
+
     return send_file(output, download_name=f'EDLIN_{sub.get("npk","")}_{sub.get("nama_lengkap","")}.xlsx',
                     mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
 
@@ -386,4 +402,5 @@ def index():
     return redirect(url_for('login'))
 
 if __name__ == '__main__':
-    app.run(debug=True, host='0.0.0.0', port=5000)
+    debug_mode = os.environ.get('FLASK_DEBUG', 'false').lower() == 'true'
+    app.run(debug=debug_mode, host='0.0.0.0', port=5000)
