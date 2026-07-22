@@ -93,7 +93,7 @@ _ocr_reader = None
 
 def get_ocr_reader():
     global _ocr_reader
-    if _ocr_reader is None:
+    if _ocr_reader is None: 
         import easyocr
         _ocr_reader = easyocr.Reader(['id', 'en'])
     return _ocr_reader
