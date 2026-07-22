@@ -368,24 +368,30 @@ def export_approved():
     if session.get('role') not in ['hr','manager']: return redirect(url_for('dashboard'))
     return send_file(generate_excel('approved'), download_name=f'Approved_{datetime.now().strftime("%Y%m%d")}.xlsx')
 
-@app.route('/export-edlin/<int:id>')
-@login_required
-def export_edlin(id):
-    """Generate EDLIN-formatted Excel matching their exact template"""
-    if session.get('role') not in ['hr','manager']:
-        return redirect(url_for('dashboard'))
+SHEET_NAME_FORBIDDEN = [':', '\\', '/', '?', '*', '[', ']']
 
-    conn = get_db()
-    sub = dict(conn.execute("SELECT * FROM submissions WHERE id=?", (id,)).fetchone())
-    conn.close()
+def sanitize_sheet_name(name):
+    name = str(name)
+    for ch in SHEET_NAME_FORBIDDEN:
+        name = name.replace(ch, '-')
+    name = name.strip() or 'Sheet'
+    return name[:31]
 
-    from openpyxl import Workbook
-    from openpyxl.styles import Font, PatternFill, Alignment, Border, Side, numbers
-    from openpyxl.utils import get_column_letter
+def unique_sheet_name(base, used):
+    name = sanitize_sheet_name(base)
+    if name not in used:
+        return name
+    n = 2
+    while True:
+        suffix = f' ({n})'
+        candidate = sanitize_sheet_name(base)[:31 - len(suffix)] + suffix
+        if candidate not in used:
+            return candidate
+        n += 1
 
-    wb = Workbook()
-    ws = wb.active
-    ws.title = "EDLIN Calculation"
+def build_edlin_sheet(ws, sub):
+    """Fill one worksheet with the EDLIN-formatted amortization schedule for a submission"""
+    from openpyxl.styles import Font, PatternFill
 
     otr = float(sub.get('loan_amount', 24389653))
     dp = float(sub.get('down_payment', 6000000))
@@ -460,11 +466,62 @@ def export_edlin(id):
     ws.cell(row=sum_row, column=2).font = bold
     ws.cell(row=sum_row, column=3).font = bold
 
+@app.route('/export-edlin/<int:id>')
+@login_required
+def export_edlin(id):
+    """Generate EDLIN-formatted Excel matching their exact template"""
+    if session.get('role') not in ['hr','manager']:
+        return redirect(url_for('dashboard'))
+
+    conn = get_db()
+    sub = dict(conn.execute("SELECT * FROM submissions WHERE id=?", (id,)).fetchone())
+    conn.close()
+
+    from openpyxl import Workbook
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "EDLIN Calculation"
+    build_edlin_sheet(ws, sub)
+
     output = BytesIO()
     wb.save(output)
     output.seek(0)
 
     return send_file(output, download_name=f'EDLIN_{sub.get("npk","")}_{sub.get("nama_lengkap","")}.xlsx',
+                    mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+
+@app.route('/export-edlin-employee/<npk>')
+@login_required
+def export_edlin_employee(npk):
+    """Generate one EDLIN-formatted workbook with a sheet per submission for this NPK's full loan history"""
+    if session.get('role') not in ['hr','manager']:
+        return redirect(url_for('dashboard'))
+
+    conn = get_db()
+    subs = [dict(r) for r in conn.execute(
+        "SELECT * FROM submissions WHERE npk=? ORDER BY submitted_date ASC", (npk,)).fetchall()]
+    conn.close()
+
+    if not subs:
+        flash('Tidak ada pengajuan untuk NPK ini', 'danger')
+        return redirect(url_for('dashboard'))
+
+    from openpyxl import Workbook
+    wb = Workbook()
+    wb.remove(wb.active)
+    used_names = set()
+    for i, sub in enumerate(subs, 1):
+        name = unique_sheet_name(f"{i}. {sub.get('application_id') or sub.get('id')}", used_names)
+        used_names.add(name)
+        ws = wb.create_sheet(title=name)
+        build_edlin_sheet(ws, sub)
+
+    output = BytesIO()
+    wb.save(output)
+    output.seek(0)
+
+    nama = subs[-1].get('nama_lengkap', '')
+    return send_file(output, download_name=f'EDLIN_{npk}_{nama}_History.xlsx',
                     mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
 
 @app.route('/')
