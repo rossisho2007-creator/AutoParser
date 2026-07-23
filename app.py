@@ -624,6 +624,131 @@ def build_edlin_sheet(ws, sub):
     ws.cell(row=sum_row, column=2).font = bold
     ws.cell(row=sum_row, column=3).font = bold
 
+def compute_monthly_journal_entries(target_year, target_month):
+    """For a given calendar month, find every EDLIN journal line that should be
+    booked that period, across ALL approved loans, regardless of when each loan
+    individually started. One-time entries (formation, insurance, LTE reversal)
+    only appear in a loan's actual start month. Recurring entries (payroll
+    deduction, interest income recognition) appear in every month that loan has
+    an installment due, using that specific month's own principal/interest split
+    -- not the lifetime total."""
+    conn = get_db()
+    subs = [dict(r) for r in conn.execute("SELECT * FROM submissions WHERE status_approval='Approved'").fetchall()]
+    conn.close()
+
+    entries = []
+    for sub in subs:
+        otr = float(sub.get('loan_amount') or 0)
+        dp = float(sub.get('down_payment') or 0)
+        tenor = int(sub.get('tenure_months') or 0)
+        if not otr or not tenor:
+            continue
+        saved_insurance = sub.get('insurance_amount')
+        insurance = float(saved_insurance) if saved_insurance is not None else round(otr * 0.053, 3)
+        rate = 0.069
+
+        start_raw = sub.get('tanggal_mulai') or ''
+        try:
+            start_date = datetime.strptime(start_raw[:10], '%Y-%m-%d').date()
+        except ValueError:
+            continue
+
+        name = sub.get('nama_lengkap', '') or '-'
+        npk = sub.get('npk', '') or '-'
+
+        sisa = otr - dp
+        total_principal = sisa + insurance
+        monthly_rate = rate / 12
+        installment = round(total_principal * monthly_rate * (1 + monthly_rate) ** tenor / ((1 + monthly_rate) ** tenor - 1))
+        total_ar = installment * tenor
+        total_interest_lifetime = total_ar - total_principal
+
+        if start_date.year == target_year and start_date.month == target_month:
+            grp = 'Pembentukan Edlin & Pembayaran Dealer'
+            entries.append({'jenis': grp, 'akun': '1213101301 - CONS FIN - EDLIN', 'debit': total_ar - insurance, 'kredit': 0, 'nama': name, 'npk': npk})
+            entries.append({'jenis': grp, 'akun': '1223101301 - CONS FIN - UNEARNED - AR EDLIN', 'debit': 0, 'kredit': total_interest_lifetime, 'nama': name, 'npk': npk})
+            entries.append({'jenis': grp, 'akun': '2222100101 - AP SUPPLIER (DEALER)', 'debit': 0, 'kredit': sisa, 'nama': name, 'npk': npk})
+            grp = 'Pembayaran Insurance ke AAB'
+            entries.append({'jenis': grp, 'akun': '1213101301 - CONS FIN - EDLIN', 'debit': insurance, 'kredit': 0, 'nama': name, 'npk': npk})
+            entries.append({'jenis': grp, 'akun': '2222100101 - AP SUPPLIER (AAB)', 'debit': 0, 'kredit': insurance, 'nama': name, 'npk': npk})
+            grp = 'Pembalikan LTE KPM ke Consfin Edlin'
+            entries.append({'jenis': grp, 'akun': '1941100801 - LTE - MOTORCYCLE (KPM)', 'debit': total_ar, 'kredit': 0, 'nama': name, 'npk': npk})
+            entries.append({'jenis': grp, 'akun': '1213101301 - CONS FIN - EDLIN', 'debit': 0, 'kredit': total_ar, 'nama': name, 'npk': npk})
+
+        balance = total_principal
+        for m in range(1, tenor + 1):
+            due = add_months(start_date, m)
+            interest_amt = balance * monthly_rate
+            principal_amt = installment - interest_amt
+            balance = round(balance - principal_amt, 0)
+            if due.year == target_year and due.month == target_month:
+                grp = f'Pemotongan Payroll (Bulan ke-{m})'
+                entries.append({'jenis': grp, 'akun': '7011100101 - SALARIES', 'debit': installment, 'kredit': 0, 'nama': name, 'npk': npk})
+                entries.append({'jenis': grp, 'akun': '1941100801 - LTE - MOTORCYCLE (KPM)', 'debit': 0, 'kredit': installment, 'nama': name, 'npk': npk})
+                grp = f'Pengakuan Income Interest (Bulan ke-{m})'
+                entries.append({'jenis': grp, 'akun': '1223101301 - CONS FIN - UNEARNED - AR EDLIN', 'debit': round(interest_amt), 'kredit': 0, 'nama': name, 'npk': npk})
+                entries.append({'jenis': grp, 'akun': '4991199901 - OTHER INCOME - OTHERS', 'debit': 0, 'kredit': round(interest_amt), 'nama': name, 'npk': npk})
+                break
+
+    entries.sort(key=lambda e: (e['jenis'], e['nama']))
+    return entries
+
+
+@app.route('/reports/edlin-monthly')
+@login_required
+def edlin_monthly_report():
+    if session.get('role') not in ['hr', 'manager']:
+        return redirect(url_for('dashboard'))
+    year = request.args.get('year', type=int)
+    month = request.args.get('month', type=int)
+    entries = compute_monthly_journal_entries(year, month) if (year and month) else []
+    total_debit = sum(e['debit'] for e in entries)
+    total_kredit = sum(e['kredit'] for e in entries)
+    return render_template('edlin_monthly.html', entries=entries, year=year, month=month,
+                            total_debit=total_debit, total_kredit=total_kredit,
+                            current_year=datetime.now().year)
+
+
+@app.route('/export-edlin-monthly')
+@login_required
+def export_edlin_monthly():
+    if session.get('role') not in ['hr', 'manager']:
+        return redirect(url_for('dashboard'))
+    year = request.args.get('year', type=int)
+    month = request.args.get('month', type=int)
+    if not year or not month:
+        flash('Pilih bulan dan tahun terlebih dahulu', 'danger')
+        return redirect(url_for('edlin_monthly_report'))
+
+    entries = compute_monthly_journal_entries(year, month)
+
+    from openpyxl import Workbook
+    from openpyxl.styles import Font
+    wb = Workbook()
+    ws = wb.active
+    ws.title = f'Jurnal {month:02d}-{year}'
+    headers = ['Jenis Jurnal', 'Akun', 'Debit', 'Kredit', 'Nama Karyawan', 'NPK']
+    for i, h in enumerate(headers):
+        cell = ws.cell(row=1, column=i + 1, value=h)
+        cell.font = Font(bold=True)
+    for r, e in enumerate(entries, start=2):
+        ws.cell(row=r, column=1, value=e['jenis'])
+        ws.cell(row=r, column=2, value=e['akun'])
+        ws.cell(row=r, column=3, value=e['debit']).number_format = '#,##0'
+        ws.cell(row=r, column=4, value=e['kredit']).number_format = '#,##0'
+        ws.cell(row=r, column=5, value=e['nama'])
+        ws.cell(row=r, column=6, value=e['npk'])
+    ws.column_dimensions['A'].width = 32
+    ws.column_dimensions['B'].width = 38
+    ws.column_dimensions['E'].width = 22
+
+    output = BytesIO()
+    wb.save(output)
+    output.seek(0)
+    return send_file(output, download_name=f'Jurnal_Bulanan_{year}-{month:02d}.xlsx',
+                    mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+
+
 @app.route('/export-edlin/<int:id>')
 @login_required
 def export_edlin(id):
