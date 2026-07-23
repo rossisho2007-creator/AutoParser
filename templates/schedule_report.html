@@ -1,0 +1,79 @@
+{% extends "base.html" %}
+{% block title %}Jadwal Angsuran{% endblock %}
+{% block content %}
+
+<div class="no-print" style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px;">
+    <div>
+        <h4 style="color:var(--blue); font-weight:700;">📅 Jadwal Angsuran — Semua Karyawan</h4>
+        <small style="color:#666;">Per {{ today }}</small>
+    </div>
+    <div>
+        <a href="/dashboard" class="btn btn-sm btn-outline-secondary">← Kembali</a>
+        <button onclick="window.print()" style="background:#1A3A5C; color:white; border:none; border-radius:8px; padding:8px 16px; font-size:13px; cursor:pointer; margin-left:6px;">🖨️ Cetak Semua</button>
+    </div>
+</div>
+
+{% if not loans %}
+<p style="color:#999; text-align:center; padding:40px;">Belum ada pinjaman yang disetujui.</p>
+{% endif %}
+
+{% for loan in loans %}
+<div style="background:#fff; border:1px solid #E5E7EB; border-radius:14px; padding:18px; margin-bottom:16px; page-break-inside:avoid;">
+    <div style="display:flex; justify-content:space-between; margin-bottom:10px;">
+        <div>
+            <strong style="color:var(--blue); font-size:15px;">{{ loan.nama_lengkap }}</strong>
+            <span style="color:#999; font-size:12px;"> · NPK {{ loan.npk }} · {{ loan.cabang or '-' }}</span>
+        </div>
+        <small style="color:#999;">{{ loan.type_motor or '-' }}</small>
+    </div>
+    <table class="table table-sm" style="margin:0; font-size:12px;">
+        <thead style="background:#F8F9FA;">
+            <tr>
+                <th>Bulan</th><th>Jatuh Tempo</th><th>Jumlah</th><th>Sisa</th><th>Status</th>
+                <th class="no-print text-center">Lunas?</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for r in loan.rows %}
+            <tr>
+                <td>{{ r.month_number }}</td>
+                <td>{{ r.due_date_display }}</td>
+                <td>Rp {{ "{:,.0f}".format(r.expected_amount or 0) }}</td>
+                <td>Rp {{ "{:,.0f}".format(r.balance_after or 0) }}</td>
+                <td>
+                    {% if r.live_status == 'Paid' %}<span class="badge bg-success">Lunas</span>
+                    {% elif r.live_status == 'Overdue' %}<span class="badge bg-danger">Terlambat</span>
+                    {% elif r.live_status == 'Due this month' %}<span class="badge bg-warning text-dark">Bulan Ini</span>
+                    {% else %}<span class="badge bg-secondary">Akan Datang</span>{% endif %}
+                    <span class="print-only" style="display:none;">
+                        {% if r.live_status == 'Paid' %}✓{% elif r.live_status == 'Overdue' %}!{% else %}–{% endif %}
+                    </span>
+                </td>
+                <td class="no-print text-center">
+                    <input type="checkbox" onchange="togglePaid({{ r.id }}, this.checked)" {% if r.is_paid %}checked{% endif %}>
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% endfor %}
+
+<style>
+@media print {
+    .no-print { display: none !important; }
+    .print-only { display: inline !important; }
+    body { background: white; }
+}
+</style>
+
+<script>
+function togglePaid(scheduleId, checked) {
+    fetch('/api/schedule/mark-paid/' + scheduleId, {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({paid: checked})
+    });
+}
+</script>
+{% endblock %}
