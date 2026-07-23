@@ -54,14 +54,14 @@
             </thead>
             <tbody>
                 {% for s in recent %}
-                <tr onclick="toggleDetail({{ s.id }})" style="cursor:pointer;">
+                <tr onclick="toggleDetail({{ s.id }}, '{{ s.status_approval }}')" style="cursor:pointer;">
                     <td><strong>{{ s.nama_lengkap or '-' }}</strong></td>
                     <td>{{ s.npk }}</td>
                     <td>{{ s.type_motor or '-' }}</td>
                     <td>{% if s.status_approval == 'Approved' %}<span class="badge bg-success">Disetujui</span>{% elif s.status_approval == 'Rejected' %}<span class="badge bg-danger">Ditolak</span>{% else %}<span class="badge bg-warning text-dark">Tertunda</span>{% endif %}</td>
                     <td class="text-center" onclick="event.stopPropagation();">
                         {% if s.status_approval == 'Pending' %}
-                        <button onclick="toggleDetail({{ s.id }})" style="background:#1A3A5C;color:white;border:none;border-radius:20px;padding:4px 10px;font-size:11px;cursor:pointer;">Review</button>
+                        <button onclick="toggleDetail({{ s.id }}, 'Pending')" style="background:#1A3A5C;color:white;border:none;border-radius:20px;padding:4px 10px;font-size:11px;cursor:pointer;">Review</button>
                         <button onclick="reject({{ s.id }})" style="background:#DC3545;color:white;border:none;border-radius:20px;padding:4px 10px;font-size:11px;cursor:pointer;">✕</button>
                         {% endif %}
                     </td>
@@ -72,25 +72,35 @@
                         <div class="row g-2" style="font-size:12px;">
                             <div class="col-3">
                                 <small style="color:#999;">Jumlah Pinjaman (OTR)</small>
-                                <input type="text" id="edit_loan_{{ s.id }}" value="{{ s.loan_amount|default(16000000)|int }}" inputmode="numeric" style="width:100%; padding:6px; border:1px solid #E5E7EB; border-radius:6px; font-size:12px;">
+                                <input type="text" id="edit_loan_{{ s.id }}" value="{{ s.loan_amount|default(16000000)|int }}" inputmode="numeric" oninput="updatePendingPreview({{ s.id }})" style="width:100%; padding:6px; border:1px solid #E5E7EB; border-radius:6px; font-size:12px;">
                             </div>
                             <div class="col-3">
                                 <small style="color:#999;">Uang Muka (DP)</small>
-                                <input type="text" id="edit_dp_{{ s.id }}" value="{{ s.down_payment|default(0)|int }}" inputmode="numeric" style="width:100%; padding:6px; border:1px solid #E5E7EB; border-radius:6px; font-size:12px;">
+                                <input type="text" id="edit_dp_{{ s.id }}" value="{{ s.down_payment|default(0)|int }}" inputmode="numeric" oninput="updatePendingPreview({{ s.id }})" style="width:100%; padding:6px; border:1px solid #E5E7EB; border-radius:6px; font-size:12px;">
                             </div>
                             <div class="col-3">
                                 <small style="color:#999;">Tenor (bulan)</small>
-                                <input type="text" id="edit_tenor_{{ s.id }}" value="{{ s.tenure_months|default(36)|int }}" inputmode="numeric" style="width:100%; padding:6px; border:1px solid #E5E7EB; border-radius:6px; font-size:12px;">
+                                <input type="text" id="edit_tenor_{{ s.id }}" value="{{ s.tenure_months|default(36)|int }}" inputmode="numeric" oninput="updatePendingPreview({{ s.id }})" style="width:100%; padding:6px; border:1px solid #E5E7EB; border-radius:6px; font-size:12px;">
                             </div>
                             <div class="col-3">
                                 <small style="color:#999;">Insurance (untuk EDLIN)</small>
                                 <input type="text" id="edit_ins_{{ s.id }}" value="{{ (s.insurance_amount if s.insurance_amount is not none else (s.loan_amount|default(16000000))*0.053)|round|int }}" inputmode="numeric" style="width:100%; padding:6px; border:1px solid #E5E7EB; border-radius:6px; font-size:12px;">
                             </div>
                         </div>
+                        <input type="hidden" id="start_{{ s.id }}" value="{{ s.tanggal_mulai or '' }}">
+                        <input type="hidden" id="emptype_{{ s.id }}" value="{{ s.employee_type or 'field' }}">
                         <label style="font-size:11px; color:#666; margin-top:8px; display:block;">
                             <input type="checkbox" onchange="if(this.checked){document.getElementById('edit_ins_{{ s.id }}').value='0';}">
                             Karyawan sudah punya asuransi sendiri (set Insurance = 0)
                         </label>
+                        <div style="margin-top:10px; padding:10px; background:#F0F9FF; border-radius:8px; display:inline-block;">
+                            <small style="color:#0369A1; font-weight:600;">🧮 Estimasi Angsuran Bulanan</small><br>
+                            <strong id="preview_monthly_{{ s.id }}" style="color:#DC3545; font-size:16px;">Rp 0</strong>
+                        </div>
+                        <div style="margin-top:10px;">
+                            <small style="color:#999; font-weight:600;">📅 Rincian Pratinjau — {{ s.tenure_months|default(36) }} Bulan</small>
+                            <div id="preview_schedule_{{ s.id }}" style="margin-top:4px;"></div>
+                        </div>
                         <button onclick="event.stopPropagation(); approveWithReview({{ s.id }})" style="margin-top:10px; background:#28A745;color:white;border:none;border-radius:8px;padding:8px 16px;font-size:12px;cursor:pointer;">✓ Konfirmasi &amp; Setujui</button>
                         <a href="/export-edlin/{{ s.id }}" onclick="event.stopPropagation();" style="margin-top:10px; margin-left:6px; display:inline-block; font-size:11px; color:var(--blue); text-decoration:none; border:1px solid #E5E7EB; border-radius:8px; padding:8px 12px;">📄 Pratinjau Edlin</a>
                         {% else %}
@@ -107,6 +117,12 @@
                             <div class="col-4"><small style="color:#999;">Alasan Ditolak</small><br>{{ s.rejection_reason }}</div>
                             {% endif %}
                         </div>
+                        {% if s.status_approval == 'Approved' %}
+                        <div style="margin-top:10px;">
+                            <small style="color:#999; font-weight:600;">📅 Rincian {{ s.tenure_months }} Bulan</small>
+                            <div id="approved_schedule_{{ s.id }}" style="margin-top:4px; font-size:11px; color:#999;">Memuat...</div>
+                        </div>
+                        {% endif %}
                         <a href="/export-edlin/{{ s.id }}" onclick="event.stopPropagation();" style="display:inline-block; margin-top:8px; margin-right:8px; font-size:11px; color:var(--blue); text-decoration:none; border:1px solid #E5E7EB; border-radius:8px; padding:5px 10px;">📄 Edlin (pengajuan ini)</a>
                         <a href="/export-edlin-employee/{{ s.npk }}" onclick="event.stopPropagation();" style="display:inline-block; margin-top:8px; font-size:11px; color:var(--blue); text-decoration:none; border:1px solid #E5E7EB; border-radius:8px; padding:5px 10px;">📚 Edlin (semua riwayat NPK ini)</a>
                         {% endif %}
@@ -159,7 +175,94 @@
 {% endif %}
 
 <script>
-function toggleDetail(id){var r=document.getElementById('detail-'+id);r.style.display=r.style.display==='none'?'table-row':'none';}
+const OFFICE_RATE_PERCENT = {{ office_rate_percent|default(5) }};
+const scheduleCache = {};
+
+function toggleDetail(id, status){
+    var r = document.getElementById('detail-'+id);
+    var opening = r.style.display === 'none';
+    r.style.display = opening ? 'table-row' : 'none';
+    if (!opening) return;
+    if (status === 'Pending') { updatePendingPreview(id); }
+    else if (status === 'Approved') { loadApprovedSchedule(id); }
+}
+
+function addMonthsJS(y, m, d, months){
+    let month = m - 1 + months;
+    let year = y + Math.floor(month / 12);
+    month = (month % 12) + 1;
+    const daysInMonth = [31, (year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0)) ? 29 : 28,
+                         31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+    const day = Math.min(d, daysInMonth[month - 1]);
+    return new Date(year, month - 1, day);
+}
+
+function renderScheduleRows(containerId, rows){
+    const container = document.getElementById(containerId);
+    if (!container) return;
+    let html = '<div style="max-height:240px; overflow-y:auto; border:1px solid #E5E7EB; border-radius:8px;">';
+    html += '<table class="table table-sm" style="margin:0; font-size:11px;"><thead style="background:#F8F9FA; position:sticky; top:0;"><tr><th>Bulan</th><th>Jatuh Tempo</th><th>Jumlah</th><th>Sisa</th></tr></thead><tbody>';
+    for (const r of rows) {
+        html += `<tr><td>${r.month}</td><td>${r.due}</td><td>Rp ${Math.round(r.amount).toLocaleString('id-ID')}</td><td>Rp ${Math.round(r.balance).toLocaleString('id-ID')}</td></tr>`;
+    }
+    html += '</tbody></table></div>';
+    container.innerHTML = html;
+}
+
+function updatePendingPreview(id){
+    const loanEl = document.getElementById('edit_loan_'+id);
+    if (!loanEl) return;
+    const loan = parseFloat((loanEl.value||'').replace(/[^0-9]/g,''))||0;
+    const dp = parseFloat((document.getElementById('edit_dp_'+id).value||'').replace(/[^0-9]/g,''))||0;
+    const tenor = parseInt((document.getElementById('edit_tenor_'+id).value||'').replace(/[^0-9]/g,''))||36;
+    const empType = document.getElementById('emptype_'+id).value;
+    const rate = (empType === 'office' ? OFFICE_RATE_PERCENT : 5) / 100;
+
+    const principal = loan - dp;
+    const totalInterest = principal * rate * (tenor / 12);
+    const monthly = tenor > 0 ? Math.round((principal + totalInterest) / tenor) : 0;
+
+    const monthlyEl = document.getElementById('preview_monthly_'+id);
+    if (monthlyEl) monthlyEl.textContent = 'Rp ' + monthly.toLocaleString('id-ID');
+
+    const startRaw = document.getElementById('start_'+id).value;
+    let sy, sm, sd;
+    if (startRaw) {
+        [sy, sm, sd] = startRaw.split('-').map(Number);
+    } else {
+        const now = new Date();
+        sy = now.getFullYear(); sm = now.getMonth()+1; sd = now.getDate();
+    }
+
+    let balance = principal + totalInterest;
+    const rows = [];
+    for (let month = 1; month <= tenor; month++) {
+        const due = addMonthsJS(sy, sm, sd, month);
+        balance = Math.round((balance - monthly) * 100) / 100;
+        rows.push({
+            month,
+            due: due.toLocaleDateString('id-ID', {day:'2-digit', month:'short', year:'numeric'}),
+            amount: monthly,
+            balance: Math.max(balance, 0)
+        });
+    }
+    renderScheduleRows('preview_schedule_'+id, rows);
+}
+
+function loadApprovedSchedule(id){
+    if (scheduleCache[id]) { renderScheduleRows('approved_schedule_'+id, scheduleCache[id]); return; }
+    fetch('/api/schedule/'+id).then(r=>r.json()).then(res=>{
+        const container = document.getElementById('approved_schedule_'+id);
+        if (res.status !== 'ok' || !res.schedule.length) {
+            if (container) container.innerHTML = '<p style="color:#999; font-size:11px;">Jadwal belum tersedia.</p>';
+            return;
+        }
+        const rows = res.schedule.map(r => ({month: r.month, due: r.due_date, amount: r.amount, balance: r.balance}));
+        scheduleCache[id] = rows;
+        renderScheduleRows('approved_schedule_'+id, rows);
+    });
+}
+
 function approveWithReview(id){
     const loan_amount = parseFloat((document.getElementById('edit_loan_'+id).value||'').replace(/[^0-9]/g,''))||0;
     const down_payment = parseFloat((document.getElementById('edit_dp_'+id).value||'').replace(/[^0-9]/g,''))||0;

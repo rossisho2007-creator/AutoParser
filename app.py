@@ -277,7 +277,37 @@ def dashboard():
         }
         recent = [dict(r) for r in conn.execute("SELECT * FROM submissions WHERE submitted_by=? ORDER BY submitted_date DESC LIMIT 50",(name,))]
     conn.close()
-    return render_template('dashboard.html', stats=stats, recent=recent)
+    office_rate_percent = float(get_setting('office_interest_rate', '0.05')) * 100
+    return render_template('dashboard.html', stats=stats, recent=recent, office_rate_percent=office_rate_percent)
+
+@app.route('/api/schedule/<int:submission_id>')
+@login_required
+def get_schedule(submission_id):
+    if session.get('role') not in ['hr','manager']: return jsonify({'status':'error'}), 403
+    conn = get_db()
+    rows = conn.execute(
+        "SELECT month_number, due_date, expected_amount, balance_after, is_paid FROM loan_schedule "
+        "WHERE submission_id=? ORDER BY month_number", (submission_id,)
+    ).fetchall()
+    conn.close()
+    if not rows:
+        return jsonify({'status':'empty'})
+    today = datetime.now().date()
+    schedule = []
+    for r in rows:
+        r = dict(r)
+        due = datetime.strptime(r['due_date'], '%Y-%m-%d').date()
+        if r['is_paid']:
+            status = 'Paid'
+        elif due < today:
+            status = 'Overdue'
+        elif due.year == today.year and due.month == today.month:
+            status = 'Due this month'
+        else:
+            status = 'Upcoming'
+        schedule.append({'month': r['month_number'], 'due_date': due.strftime('%d %b %Y'),
+                          'amount': r['expected_amount'], 'balance': r['balance_after'], 'status': status})
+    return jsonify({'status': 'ok', 'schedule': schedule})
 
 @app.route('/scan', methods=['GET','POST'])
 @login_required
