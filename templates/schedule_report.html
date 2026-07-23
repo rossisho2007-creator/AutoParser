@@ -5,17 +5,24 @@
 <div class="no-print" style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px;">
     <div>
         <h4 style="color:var(--blue); font-weight:700;">📅 Jadwal Angsuran — Semua Karyawan</h4>
-        <small style="color:#666;">Per {{ today }}</small>
+        <small style="color:#666;">Per {{ today }} · Centang "Sertakan" untuk memilih baris yang masuk ke Excel</small>
     </div>
     <div>
         <a href="/dashboard" class="btn btn-sm btn-outline-secondary">← Kembali</a>
-        <button onclick="window.print()" style="background:#1A3A5C; color:white; border:none; border-radius:8px; padding:8px 16px; font-size:13px; cursor:pointer; margin-left:6px;">🖨️ Cetak Semua</button>
+        <button type="button" onclick="window.print()" style="background:#1A3A5C; color:white; border:none; border-radius:8px; padding:8px 16px; font-size:13px; cursor:pointer; margin-left:6px;">🖨️ Cetak</button>
     </div>
 </div>
 
 {% if not loans %}
 <p style="color:#999; text-align:center; padding:40px;">Belum ada pinjaman yang disetujui.</p>
 {% endif %}
+
+<form method="POST" action="/export-schedule-excel">
+<div class="no-print" style="margin-bottom:12px;">
+    <button type="submit" style="background:#28A745; color:white; border:none; border-radius:8px; padding:10px 20px; font-size:14px; font-weight:600; cursor:pointer;">📥 Unduh Excel (baris terpilih)</button>
+    <button type="button" onclick="toggleAll(true)" style="background:#fff; color:var(--blue); border:1px solid var(--blue); border-radius:8px; padding:10px 16px; font-size:13px; cursor:pointer; margin-left:6px;">Pilih Semua</button>
+    <button type="button" onclick="toggleAll(false)" style="background:#fff; color:#999; border:1px solid #E5E7EB; border-radius:8px; padding:10px 16px; font-size:13px; cursor:pointer; margin-left:6px;">Kosongkan</button>
+</div>
 
 {% for loan in loans %}
 <div style="background:#fff; border:1px solid #E5E7EB; border-radius:14px; padding:18px; margin-bottom:16px; page-break-inside:avoid;">
@@ -29,6 +36,7 @@
     <table class="table table-sm" style="margin:0; font-size:12px;">
         <thead style="background:#F8F9FA;">
             <tr>
+                <th class="no-print">Sertakan</th>
                 <th>Bulan</th><th>Jatuh Tempo</th><th>Jumlah</th><th>Sisa</th><th>Status</th>
                 <th class="no-print text-center">Lunas?</th>
             </tr>
@@ -36,17 +44,14 @@
         <tbody>
             {% for r in loan.rows %}
             <tr>
+                <td class="no-print"><input type="checkbox" name="include" value="{{ r.id }}" class="include-box" checked></td>
                 <td>{{ r.month_number }}</td>
                 <td>{{ r.due_date_display }}</td>
                 <td>Rp {{ "{:,.0f}".format(r.expected_amount or 0) }}</td>
                 <td>Rp {{ "{:,.0f}".format(r.balance_after or 0) }}</td>
                 <td>
-                    {% if r.live_status == 'Paid' %}<span class="badge bg-success">Lunas</span>
-                    {% elif r.live_status == 'Overdue' %}<span class="badge bg-danger">Terlambat</span>
-                    {% elif r.live_status == 'Due this month' %}<span class="badge bg-warning text-dark">Bulan Ini</span>
-                    {% else %}<span class="badge bg-secondary">Akan Datang</span>{% endif %}
-                    <span class="print-only" style="display:none;">
-                        {% if r.live_status == 'Paid' %}✓{% elif r.live_status == 'Overdue' %}!{% else %}–{% endif %}
+                    <span id="badge-{{ r.id }}" class="badge {% if r.live_status == 'Paid' %}bg-success{% elif r.live_status == 'Overdue' %}bg-danger{% elif r.live_status == 'Due this month' %}bg-warning text-dark{% else %}bg-secondary{% endif %}">
+                        {% if r.live_status == 'Paid' %}Lunas{% elif r.live_status == 'Overdue' %}Terlambat{% elif r.live_status == 'Due this month' %}Bulan Ini{% else %}Akan Datang{% endif %}
                     </span>
                 </td>
                 <td class="no-print text-center">
@@ -58,22 +63,40 @@
     </table>
 </div>
 {% endfor %}
+</form>
 
 <style>
 @media print {
     .no-print { display: none !important; }
-    .print-only { display: inline !important; }
     body { background: white; }
 }
 </style>
 
 <script>
+function toggleAll(state) {
+    document.querySelectorAll('.include-box').forEach(cb => cb.checked = state);
+}
+
 function togglePaid(scheduleId, checked) {
     fetch('/api/schedule/mark-paid/' + scheduleId, {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
         body: JSON.stringify({paid: checked})
-    });
+    })
+    .then(r => r.json())
+    .then(res => {
+        if (res.status !== 'ok') { alert('Gagal menyimpan status.'); return; }
+        const badge = document.getElementById('badge-' + scheduleId);
+        if (!badge) return;
+        if (checked) {
+            badge.className = 'badge bg-success';
+            badge.textContent = 'Lunas';
+        } else {
+            badge.className = 'badge bg-secondary';
+            badge.textContent = 'Belum Lunas';
+        }
+    })
+    .catch(() => alert('Gagal menyimpan status — periksa koneksi.'));
 }
 </script>
 {% endblock %}

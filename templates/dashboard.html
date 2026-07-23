@@ -85,13 +85,13 @@
                             </div>
                             <div class="col-3">
                                 <small style="color:#999;">Insurance (untuk EDLIN)</small>
-                                <input type="text" id="edit_ins_{{ s.id }}" value="{{ (s.insurance_amount if s.insurance_amount is not none else (s.loan_amount|default(16000000))*0.053)|round|int }}" inputmode="numeric" style="width:100%; padding:6px; border:1px solid #E5E7EB; border-radius:6px; font-size:12px;">
+                                <input type="text" id="edit_ins_{{ s.id }}" data-estimate="{{ ((s.loan_amount|default(16000000))*0.053)|round|int }}" value="{{ (s.insurance_amount if s.insurance_amount is not none else (s.loan_amount|default(16000000))*0.053)|round|int }}" inputmode="numeric" style="width:100%; padding:6px; border:1px solid #E5E7EB; border-radius:6px; font-size:12px; transition:background 0.3s;">
                             </div>
                         </div>
                         <input type="hidden" id="start_{{ s.id }}" value="{{ s.tanggal_mulai or '' }}">
                         <input type="hidden" id="emptype_{{ s.id }}" value="{{ s.employee_type or 'field' }}">
                         <label style="font-size:11px; color:#666; margin-top:8px; display:block;">
-                            <input type="checkbox" onchange="if(this.checked){document.getElementById('edit_ins_{{ s.id }}').value='0';}">
+                            <input type="checkbox" onchange="toggleInsuranceOwn({{ s.id }}, this.checked)">
                             Karyawan sudah punya asuransi sendiri (set Insurance = 0)
                         </label>
                         <div style="margin-top:10px; padding:10px; background:#F0F9FF; border-radius:8px; display:inline-block;">
@@ -248,6 +248,19 @@ function updatePendingPreview(id){
         });
     }
     renderScheduleRows('preview_schedule_'+id, rows);
+}
+
+function toggleInsuranceOwn(id, checked){
+    const input = document.getElementById('edit_ins_'+id);
+    if (!input) return;
+    if (checked) {
+        input.dataset.prevValue = input.value;
+        input.value = '0';
+    } else {
+        input.value = input.dataset.prevValue || input.dataset.estimate || '0';
+    }
+    input.style.background = '#FFF3B0';
+    setTimeout(() => { input.style.background = ''; }, 500);
 }
 
 function loadApprovedSchedule(id){

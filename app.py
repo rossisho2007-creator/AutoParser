@@ -503,6 +503,60 @@ def schedule_report():
 
     return render_template('schedule_report.html', loans=list(loans.values()), today=today.strftime('%d %B %Y'))
 
+@app.route('/export-schedule-excel', methods=['POST'])
+@login_required
+def export_schedule_excel():
+    if session.get('role') not in ['hr','manager']:
+        return redirect(url_for('dashboard'))
+    included_ids = request.form.getlist('include')
+    if not included_ids:
+        flash('Tidak ada baris yang dipilih untuk diekspor', 'danger')
+        return redirect(url_for('schedule_report'))
+
+    placeholders = ','.join('?' * len(included_ids))
+    conn = get_db()
+    rows = conn.execute(
+        f"SELECT ls.*, s.nama_lengkap, s.npk, s.cabang, s.type_motor "
+        f"FROM loan_schedule ls JOIN submissions s ON s.id = ls.submission_id "
+        f"WHERE ls.id IN ({placeholders}) "
+        f"ORDER BY s.nama_lengkap, ls.month_number", included_ids
+    ).fetchall()
+    conn.close()
+
+    from openpyxl import Workbook
+    from openpyxl.styles import Font
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Jadwal Angsuran"
+    headers = ['Nama', 'NPK', 'Cabang', 'Bulan', 'Jatuh Tempo', 'Jumlah', 'Sisa', 'Status']
+    for i, h in enumerate(headers):
+        ws.cell(row=1, column=i + 1, value=h).font = Font(bold=True)
+
+    today = datetime.now().date()
+    for r_idx, row in enumerate(rows, start=2):
+        r = dict(row)
+        due = datetime.strptime(r['due_date'], '%Y-%m-%d').date()
+        if r['is_paid']: status = 'Lunas'
+        elif due < today: status = 'Terlambat'
+        elif due.year == today.year and due.month == today.month: status = 'Bulan Ini'
+        else: status = 'Akan Datang'
+        ws.cell(row=r_idx, column=1, value=r['nama_lengkap'])
+        ws.cell(row=r_idx, column=2, value=r['npk'])
+        ws.cell(row=r_idx, column=3, value=r['cabang'])
+        ws.cell(row=r_idx, column=4, value=r['month_number'])
+        ws.cell(row=r_idx, column=5, value=due.strftime('%d %b %Y'))
+        ws.cell(row=r_idx, column=6, value=r['expected_amount']).number_format = '#,##0'
+        ws.cell(row=r_idx, column=7, value=r['balance_after']).number_format = '#,##0'
+        ws.cell(row=r_idx, column=8, value=status)
+    for col, w in zip('ABCDEFGH', [22, 12, 14, 8, 14, 14, 14, 12]):
+        ws.column_dimensions[col].width = w
+
+    output = BytesIO()
+    wb.save(output)
+    output.seek(0)
+    return send_file(output, download_name=f'Jadwal_Angsuran_{datetime.now().strftime("%Y%m%d")}.xlsx',
+                    mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+
 @app.route('/api/reject/<int:id>', methods=['POST'])
 @login_required
 def reject(id):
