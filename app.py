@@ -580,227 +580,156 @@ def export_approved():
     if session.get('role') not in ['hr','manager']: return redirect(url_for('dashboard'))
     return send_file(generate_excel('approved'), download_name=f'Approved_{datetime.now().strftime("%Y%m%d")}.xlsx')
 
-SHEET_NAME_FORBIDDEN = [':', '\\', '/', '?', '*', '[', ']']
+# Accounting-style number formats, copied exactly from the reference workbook
+_ACC_FMT = '_(* #,##0_);_(* \\(#,##0\\);_(* "-"??_);_(@_)'
+_ACC_FMT_JOURNAL = '_-* #,##0_-;\\-* #,##0_-;_-* "-"_-;_-@_-'
+_PCT_FMT_2 = '0.00%'
+_PCT_FMT_3 = '0.000%'
 
-def sanitize_sheet_name(name):
-    name = str(name)
-    for ch in SHEET_NAME_FORBIDDEN:
-        name = name.replace(ch, '-')
-    name = name.strip() or 'Sheet'
-    return name[:31]
-
-def unique_sheet_name(base, used):
-    name = sanitize_sheet_name(base)
-    if name not in used:
-        return name
-    n = 2
-    while True:
-        suffix = f' ({n})'
-        candidate = sanitize_sheet_name(base)[:31 - len(suffix)] + suffix
-        if candidate not in used:
-            return candidate
-        n += 1
+def _id_number(n):
+    """Format a number Indonesian-style: 1.234.567 (dot thousands separator)."""
+    return f"{n:,.0f}".replace(",", ".")
 
 def build_edlin_sheet(ws, sub):
-    """Fill one worksheet with the EDLIN-formatted amortization schedule for a submission"""
-    from openpyxl.styles import Font, PatternFill
+    """Write one submission's EDLIN journal into the given worksheet, matching
+    TAF's reference template cell-for-cell AND visually: same rows/columns, same
+    live Excel formulas, same journal entries, same fonts/colors/borders/widths.
+    Shared by both the single-submission export and the per-employee export."""
+    from openpyxl.styles import Font, PatternFill, Border, Side, Alignment
 
-    otr = float(sub.get('loan_amount', 24389653))
-    dp = float(sub.get('down_payment', 6000000))
-    tenor = int(sub.get('tenure_months', 36))
-    rate = 0.069
+    otr = float(sub.get('loan_amount') or 24389653)
+    dp = float(sub.get('down_payment') or 6000000)
+    tenor = int(sub.get('tenure_months') or 24)
+    rate = 0.069  # COF + 1% -- TAF's internal EDLIN funding rate, separate from
+                  # the employee-facing 5% flat rate used elsewhere in the app.
+    saved_insurance = sub.get('insurance_amount')
+    insurance = float(saved_insurance) if saved_insurance is not None else round(otr * 0.053, 3)
+
     monthly_rate = rate / 12
-    insurance = otr * 0.053
-
-    sisa = otr - dp
-    total_principal = sisa + insurance
-    monthly_installment = round(-1 * (total_principal * monthly_rate * (1 + monthly_rate)**tenor) / ((1 + monthly_rate)**tenor - 1), 0)
+    total_principal = (otr - dp) + insurance
+    monthly_installment = round(total_principal * monthly_rate * (1 + monthly_rate) ** tenor / ((1 + monthly_rate) ** tenor - 1))
     total_ar = monthly_installment * tenor
-    total_interest = total_ar - total_principal
 
     bold = Font(bold=True, size=11)
     title_font = Font(bold=True, size=14)
-    header_fill = PatternFill(start_color='F2F2F2', end_color='F2F2F2', fill_type='solid')
-    currency_fmt = '#,##0'
+    journal_header_font = Font(bold=True, color='FF0070C0')
+    note_font = Font(color='FF0070C0')
+    thin = Side(style='thin')
+    all_thin = Border(top=thin, bottom=thin, left=thin, right=thin)
+    header_fill = PatternFill(start_color='D9E2F3', end_color='D9E2F3', fill_type='solid')
+    center_wrap = Alignment(horizontal='center', vertical='center', wrap_text=True)
+    left_center_wrap = Alignment(horizontal='left', vertical='center', wrap_text=True)
 
-    ws['A1'] = 'Skema Jurnal EDLIN'
-    ws['A1'].font = title_font
-    ws['A2'] = 'Nama Karyawan'
+    ws.column_dimensions['A'].width = 22.27
+    ws.column_dimensions['B'].width = 13.73
+    ws.column_dimensions['C'].width = 14.63
+    ws.column_dimensions['D'].width = 16.73
+    ws.column_dimensions['E'].width = 14.27
+    ws.column_dimensions['N'].width = 11.82
+
+    ws['H1'] = 'Skema Jurnal EDLIN'
+    ws['H1'].font = title_font
+    ws['H1'].border = Border(bottom=Side(style='medium'))
+    ws['A2'] = 'Nama Karyawan'; ws['A2'].alignment = Alignment(horizontal='left')
     ws['B2'] = sub.get('nama_lengkap', '')
-    ws['A3'] = 'NPK'
+    ws['A3'] = 'NPK'; ws['A3'].alignment = Alignment(horizontal='left')
     ws['B3'] = sub.get('npk', '')
 
-    row = 5
-    data = [
-        ('OTR', otr), ('DP (min 10%)', dp), ('Sisa', sisa),
-        ('Insurance', insurance), ('Total Principal', total_principal),
-        ('Interest', total_interest), ('Total AR', total_ar),
-        ('Rate', rate), ('Tenor', tenor),
-        ('Bunga per bulan', monthly_rate), ('Angsuran total anuitas', monthly_installment)
-    ]
-    for label, value in data:
-        ws[f'A{row}'] = label
-        ws[f'B{row}'] = value
-        ws[f'B{row}'].number_format = currency_fmt
-        row += 2
+    for coord, label, val, fmt in [
+        ('5', 'OTR', otr, _ACC_FMT), ('6', 'DP (min 10%)', dp, _ACC_FMT), ('7', 'Sisa', '=B5-B6', _ACC_FMT),
+        ('8', 'Insurance', insurance, _ACC_FMT), ('9', 'Total Principal', '=SUM(B7:B8)', _ACC_FMT),
+        ('10', 'Interest', '=B11-B9', _ACC_FMT), ('11', 'Total AR', '=B16*B14', _ACC_FMT),
+        ('13', 'Rate', rate, _PCT_FMT_2), ('14', 'Tenor', tenor, None),
+        ('15', 'Bunga per bulan', '=B13/12', _PCT_FMT_3), ('16', 'Angsuran total anuitas', '=ROUND(-PMT(B15,B14,B9),0)', _ACC_FMT),
+    ]:
+        ws[f'A{coord}'] = label
+        ws[f'A{coord}'].alignment = Alignment(horizontal='left')
+        ws[f'B{coord}'] = val
+        if fmt: ws[f'B{coord}'].number_format = fmt
 
-    row = 29
+    ws['C8'] = 'Total Premi'
+    ws['C10'] = 'Effective Rate'
+    ws['C13'] = 'Effective Rate'
+
+    ws['B9'].font = bold
+    ws['B9'].border = Border(top=thin)
+
+    ws['H3'] = 'Jurnal pembentukan Edlin dan pembayaran ke Dealer'; ws['H3'].font = journal_header_font
+    ws['H4'] = '1213101301 - CONS FIN - EDLIN'
+    ws['N4'] = '=B11-B8'; ws['N4'].number_format = _ACC_FMT_JOURNAL
+    ws['O4'] = 0; ws['O4'].number_format = _ACC_FMT
+    ws['Q4'] = f'Total Consfin Edlin menjadi sama dengan yang harus dibayar Karyawan = {_id_number(total_ar)}'
+    ws['Q4'].font = note_font
+    ws['Q4'].alignment = center_wrap
+    ws.merge_cells('Q4:R9')
+    ws['H5'] = '1223101301 - CONS FIN - UNEARNED - AR EDLIN'
+    ws['N5'] = 0; ws['N5'].number_format = _ACC_FMT_JOURNAL
+    ws['O5'] = '=B10'; ws['O5'].number_format = _ACC_FMT
+    ws['H6'] = '2222100101 - AP SUPPLIER (DEALER)'
+    ws['N6'] = 0; ws['N6'].number_format = _ACC_FMT_JOURNAL
+    ws['O6'] = '=B7'; ws['O6'].number_format = _ACC_FMT
+
+    ws['H8'] = 'Jurnal pembayaran insurance ke AAB'; ws['H8'].font = journal_header_font
+    ws['H9'] = '1213101301 - CONS FIN - EDLIN'
+    ws['N9'] = '=B8'; ws['N9'].number_format = _ACC_FMT_JOURNAL
+    ws['O9'] = 0; ws['O9'].number_format = _ACC_FMT_JOURNAL
+    ws['H10'] = '2222100101 - AP SUPPLIER (AAB)'
+    ws['N10'] = 0; ws['N10'].number_format = _ACC_FMT_JOURNAL
+    ws['O10'] = '=B8'; ws['O10'].number_format = _ACC_FMT_JOURNAL
+
+    ws['H12'] = (f'Jurnal pemotongan payroll karyawan (tiap bulan {_id_number(monthly_installment)} '
+                 f'sampai {tenor} bulan = {_id_number(total_ar)})')
+    ws['H12'].font = journal_header_font
+    ws['H13'] = '7011100101 - SALARIES'
+    ws['N13'] = '=B16*B14'; ws['N13'].number_format = _ACC_FMT_JOURNAL
+    ws['O13'] = 0; ws['O13'].number_format = _ACC_FMT_JOURNAL
+    ws['H14'] = '1941100801 - LTE - MOTORCYCLE (KPM)'
+    ws['N14'] = 0; ws['N14'].number_format = _ACC_FMT_JOURNAL
+    ws['O14'] = '=B16*B14'; ws['O14'].number_format = _ACC_FMT_JOURNAL
+
+    ws['H16'] = 'Jurnal pembalikan LTE KPM ke Consfin Edlin'; ws['H16'].font = journal_header_font
+    ws['H17'] = '1941100801 - LTE - MOTORCYCLE (KPM)'
+    ws['N17'] = '=O14'; ws['N17'].number_format = _ACC_FMT_JOURNAL
+    ws['H18'] = '1213101301 - CONS FIN - EDLIN'
+    ws['O18'] = '=N17'; ws['O18'].number_format = _ACC_FMT_JOURNAL
+
     headers = ['Month', 'Principal', 'Interest', 'Installment', 'Balance']
-    for i, h in enumerate(headers):
-        cell = ws.cell(row=row, column=i+1, value=h)
+    for i, label in enumerate(headers):
+        col = 'ABCDE'[i]
+        cell = ws[f'{col}19']
+        cell.value = label
         cell.font = bold
         cell.fill = header_fill
+        cell.border = all_thin
+        cell.alignment = left_center_wrap if col == 'A' else center_wrap
 
-    balance = total_principal
-    total_principal_paid = 0
-    total_interest_paid = 0
+    ws['H20'] = 'Jurnal pengakuan income atas Interest Edlin'; ws['H20'].font = journal_header_font
+    ws['H21'] = '1223101301 - CONS FIN - UNEARNED - AR EDLIN'
+    ws['N21'] = '=O5'; ws['N21'].number_format = _ACC_FMT_JOURNAL
+    ws['O21'] = 0; ws['O21'].number_format = _ACC_FMT_JOURNAL
+    ws['H22'] = '4991199901 - OTHER INCOME - OTHERS'
+    ws['N22'] = 0; ws['N22'].number_format = _ACC_FMT_JOURNAL
+    ws['O22'] = '=O5'; ws['O22'].number_format = _ACC_FMT_JOURNAL
 
-    ws.cell(row=row+1, column=5, value=balance).number_format = currency_fmt
+    ws['A20'] = 0
+    ws['A20'].border = all_thin
+    ws['A20'].alignment = center_wrap
+    ws['E20'] = '=B9'; ws['E20'].number_format = _ACC_FMT
+    ws['E20'].border = all_thin
+    for col in 'BCD':
+        ws[f'{col}20'].border = all_thin
 
     for month in range(1, tenor + 1):
-        r = row + 1 + month
-        interest_payment = balance * monthly_rate
-        principal_payment = monthly_installment - interest_payment
-        balance = round(balance - principal_payment, 0)
-
-        ws.cell(row=r, column=1, value=month)
-        ws.cell(row=r, column=2, value=round(principal_payment)).number_format = currency_fmt
-        ws.cell(row=r, column=3, value=round(interest_payment)).number_format = currency_fmt
-        ws.cell(row=r, column=4, value=monthly_installment).number_format = currency_fmt
-        ws.cell(row=r, column=5, value=max(0, balance)).number_format = currency_fmt
-
-        total_principal_paid += principal_payment
-        total_interest_paid += interest_payment
-
-    sum_row = row + 2 + tenor
-    ws.cell(row=sum_row, column=2, value=round(total_principal_paid)).number_format = currency_fmt
-    ws.cell(row=sum_row, column=3, value=round(total_interest_paid)).number_format = currency_fmt
-    ws.cell(row=sum_row, column=2).font = bold
-    ws.cell(row=sum_row, column=3).font = bold
-
-def compute_monthly_journal_entries(target_year, target_month):
-    """For a given calendar month, find every EDLIN journal line that should be
-    booked that period, across ALL approved loans, regardless of when each loan
-    individually started. One-time entries (formation, insurance, LTE reversal)
-    only appear in a loan's actual start month. Recurring entries (payroll
-    deduction, interest income recognition) appear in every month that loan has
-    an installment due, using that specific month's own principal/interest split
-    -- not the lifetime total."""
-    conn = get_db()
-    subs = [dict(r) for r in conn.execute("SELECT * FROM submissions WHERE status_approval='Approved'").fetchall()]
-    conn.close()
-
-    entries = []
-    for sub in subs:
-        otr = float(sub.get('loan_amount') or 0)
-        dp = float(sub.get('down_payment') or 0)
-        tenor = int(sub.get('tenure_months') or 0)
-        if not otr or not tenor:
-            continue
-        saved_insurance = sub.get('insurance_amount')
-        insurance = float(saved_insurance) if saved_insurance is not None else round(otr * 0.053, 3)
-        rate = 0.069
-
-        start_raw = sub.get('tanggal_mulai') or ''
-        try:
-            start_date = datetime.strptime(start_raw[:10], '%Y-%m-%d').date()
-        except ValueError:
-            continue
-
-        name = sub.get('nama_lengkap', '') or '-'
-        npk = sub.get('npk', '') or '-'
-
-        sisa = otr - dp
-        total_principal = sisa + insurance
-        monthly_rate = rate / 12
-        installment = round(total_principal * monthly_rate * (1 + monthly_rate) ** tenor / ((1 + monthly_rate) ** tenor - 1))
-        total_ar = installment * tenor
-        total_interest_lifetime = total_ar - total_principal
-
-        if start_date.year == target_year and start_date.month == target_month:
-            grp = 'Pembentukan Edlin & Pembayaran Dealer'
-            entries.append({'jenis': grp, 'akun': '1213101301 - CONS FIN - EDLIN', 'debit': total_ar - insurance, 'kredit': 0, 'nama': name, 'npk': npk})
-            entries.append({'jenis': grp, 'akun': '1223101301 - CONS FIN - UNEARNED - AR EDLIN', 'debit': 0, 'kredit': total_interest_lifetime, 'nama': name, 'npk': npk})
-            entries.append({'jenis': grp, 'akun': '2222100101 - AP SUPPLIER (DEALER)', 'debit': 0, 'kredit': sisa, 'nama': name, 'npk': npk})
-            grp = 'Pembayaran Insurance ke AAB'
-            entries.append({'jenis': grp, 'akun': '1213101301 - CONS FIN - EDLIN', 'debit': insurance, 'kredit': 0, 'nama': name, 'npk': npk})
-            entries.append({'jenis': grp, 'akun': '2222100101 - AP SUPPLIER (AAB)', 'debit': 0, 'kredit': insurance, 'nama': name, 'npk': npk})
-            grp = 'Pembalikan LTE KPM ke Consfin Edlin'
-            entries.append({'jenis': grp, 'akun': '1941100801 - LTE - MOTORCYCLE (KPM)', 'debit': total_ar, 'kredit': 0, 'nama': name, 'npk': npk})
-            entries.append({'jenis': grp, 'akun': '1213101301 - CONS FIN - EDLIN', 'debit': 0, 'kredit': total_ar, 'nama': name, 'npk': npk})
-
-        balance = total_principal
-        for m in range(1, tenor + 1):
-            due = add_months(start_date, m)
-            interest_amt = balance * monthly_rate
-            principal_amt = installment - interest_amt
-            balance = round(balance - principal_amt, 0)
-            if due.year == target_year and due.month == target_month:
-                grp = f'Pemotongan Payroll (Bulan ke-{m})'
-                entries.append({'jenis': grp, 'akun': '7011100101 - SALARIES', 'debit': installment, 'kredit': 0, 'nama': name, 'npk': npk})
-                entries.append({'jenis': grp, 'akun': '1941100801 - LTE - MOTORCYCLE (KPM)', 'debit': 0, 'kredit': installment, 'nama': name, 'npk': npk})
-                grp = f'Pengakuan Income Interest (Bulan ke-{m})'
-                entries.append({'jenis': grp, 'akun': '1223101301 - CONS FIN - UNEARNED - AR EDLIN', 'debit': round(interest_amt), 'kredit': 0, 'nama': name, 'npk': npk})
-                entries.append({'jenis': grp, 'akun': '4991199901 - OTHER INCOME - OTHERS', 'debit': 0, 'kredit': round(interest_amt), 'nama': name, 'npk': npk})
-                break
-
-    entries.sort(key=lambda e: (e['jenis'], e['nama']))
-    return entries
-
-
-@app.route('/reports/edlin-monthly')
-@login_required
-def edlin_monthly_report():
-    if session.get('role') not in ['hr', 'manager']:
-        return redirect(url_for('dashboard'))
-    year = request.args.get('year', type=int)
-    month = request.args.get('month', type=int)
-    entries = compute_monthly_journal_entries(year, month) if (year and month) else []
-    total_debit = sum(e['debit'] for e in entries)
-    total_kredit = sum(e['kredit'] for e in entries)
-    return render_template('edlin_monthly.html', entries=entries, year=year, month=month,
-                            total_debit=total_debit, total_kredit=total_kredit,
-                            current_year=datetime.now().year)
-
-
-@app.route('/export-edlin-monthly')
-@login_required
-def export_edlin_monthly():
-    if session.get('role') not in ['hr', 'manager']:
-        return redirect(url_for('dashboard'))
-    year = request.args.get('year', type=int)
-    month = request.args.get('month', type=int)
-    if not year or not month:
-        flash('Pilih bulan dan tahun terlebih dahulu', 'danger')
-        return redirect(url_for('edlin_monthly_report'))
-
-    entries = compute_monthly_journal_entries(year, month)
-
-    from openpyxl import Workbook
-    from openpyxl.styles import Font
-    wb = Workbook()
-    ws = wb.active
-    ws.title = f'Jurnal {month:02d}-{year}'
-    headers = ['Jenis Jurnal', 'Akun', 'Debit', 'Kredit', 'Nama Karyawan', 'NPK']
-    for i, h in enumerate(headers):
-        cell = ws.cell(row=1, column=i + 1, value=h)
-        cell.font = Font(bold=True)
-    for r, e in enumerate(entries, start=2):
-        ws.cell(row=r, column=1, value=e['jenis'])
-        ws.cell(row=r, column=2, value=e['akun'])
-        ws.cell(row=r, column=3, value=e['debit']).number_format = '#,##0'
-        ws.cell(row=r, column=4, value=e['kredit']).number_format = '#,##0'
-        ws.cell(row=r, column=5, value=e['nama'])
-        ws.cell(row=r, column=6, value=e['npk'])
-    ws.column_dimensions['A'].width = 32
-    ws.column_dimensions['B'].width = 38
-    ws.column_dimensions['E'].width = 22
-
-    output = BytesIO()
-    wb.save(output)
-    output.seek(0)
-    return send_file(output, download_name=f'Jurnal_Bulanan_{year}-{month:02d}.xlsx',
-                    mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+        r = 20 + month
+        ws[f'A{r}'] = month
+        ws[f'B{r}'] = f'=D{r}-C{r}'; ws[f'B{r}'].number_format = _ACC_FMT
+        ws[f'C{r}'] = f'=E{r-1}*$B$15'; ws[f'C{r}'].number_format = _ACC_FMT
+        ws[f'D{r}'] = '=B16' if month == 1 else f'=D{r-1}'
+        ws[f'D{r}'].number_format = _ACC_FMT
+        ws[f'E{r}'] = f'=ROUND(E{r-1}-B{r},0)'; ws[f'E{r}'].number_format = _ACC_FMT
+        for col in 'ABCDE':
+            ws[f'{col}{r}'].border = all_thin
+            ws[f'{col}{r}'].alignment = center_wrap if col == 'A' else Alignment(vertical='center', wrap_text=True)
 
 
 @app.route('/export-edlin/<int:id>')

@@ -44,7 +44,7 @@
         <tbody>
             {% for r in loan.rows %}
             <tr>
-                <td class="no-print"><input type="checkbox" name="include" value="{{ r.id }}" class="include-box" checked></td>
+                <td class="no-print"><input type="checkbox" name="include" value="{{ r.id }}" class="include-box" checked onchange="toggleRowVisibility(this)"></td>
                 <td>{{ r.month_number }}</td>
                 <td>{{ r.due_date_display }}</td>
                 <td>Rp {{ "{:,.0f}".format(r.expected_amount or 0) }}</td>
@@ -74,7 +74,14 @@
 
 <script>
 function toggleAll(state) {
-    document.querySelectorAll('.include-box').forEach(cb => cb.checked = state);
+    document.querySelectorAll('.include-box').forEach(cb => {
+        cb.checked = state;
+        cb.closest('tr').style.display = state ? '' : 'none';
+    });
+}
+
+function toggleRowVisibility(checkbox) {
+    checkbox.closest('tr').style.display = checkbox.checked ? '' : 'none';
 }
 
 function togglePaid(scheduleId, checked) {
