@@ -164,12 +164,12 @@ def smart_parse(text):
     result, conf = {}, {}
     tests = [
         ('npk', r'(?:NPK|NOPEK|No\.?\s*Pokok(?:\s*Karyawan)?|NIK)\s*:?\s*(\d{3,})'),
-        ('nama_lengkap', r'(?:Nama|Name)\s*:\s*([A-Za-z\s\.]{3,60}?)(?=\s*' + NEXT_LABEL + r')'),
-        ('jabatan_gol', r'Jabatan\s*/?\s*Gol\s*:\s*([A-Za-z0-9\s\/\-\.]{2,30}?)(?=\s*' + NEXT_LABEL + r')'),
-        ('departemen_cabang', r'Departemen\s*/?\s*Divisi\s*/?\s*Cabang\s*:\s*([A-Za-z0-9\s\/\-\.]{3,60}?)(?=\s*' + NEXT_LABEL + r')'),
-        ('no_rangka', r'(?:No\.?\s*Rangka|Rangka)\s*:\s*([A-Za-z0-9\-]{5,30}?)(?=\s*' + NEXT_LABEL + r')'),
-        ('no_mesin', r'(?:No\.?\s*Mesin|Mesin)\s*:\s*([A-Za-z0-9\-]{5,30}?)(?=\s*' + NEXT_LABEL + r')'),
-        ('bpkb', r'(?:BPKB)\s*:\s*([A-Za-z0-9\-]{3,30}?)(?=\s*' + NEXT_LABEL + r')'),
+        ('nama_lengkap', r'(?:Nama|Name)\s*:?\s*([A-Za-z\s\.]{3,60}?)(?=\s*' + NEXT_LABEL + r')'),
+        ('jabatan_gol', r'Jabatan\s*/?\s*Gol\s*:?\s*([A-Za-z0-9\s\/\-\.]{2,30}?)(?=\s*' + NEXT_LABEL + r')'),
+        ('departemen_cabang', r'Departemen\s*/?\s*Divisi\s*/?\s*Cabang\s*:?\s*([A-Za-z0-9\s\/\-\.]{3,60}?)(?=\s*' + NEXT_LABEL + r')'),
+        ('no_rangka', r'(?:No\.?\s*Rangka|Rangka)\s*:?\s*([A-Za-z0-9\-]{5,30}?)(?=\s*' + NEXT_LABEL + r')'),
+        ('no_mesin', r'(?:No\.?\s*Mesin|Mesin)\s*:?\s*([A-Za-z0-9\-]{5,30}?)(?=\s*' + NEXT_LABEL + r')'),
+        ('bpkb', r'(?:BPKB)\s*:?\s*([A-Za-z0-9\-]{3,30}?)(?=\s*' + NEXT_LABEL + r')'),
     ]
     for field, pat in tests:
         try:
